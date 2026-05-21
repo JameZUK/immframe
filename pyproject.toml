@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "immframe"
+description = "Picture-frame slideshow for Immich, with Home Assistant integration"
+version = "0.0.1"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "TBD" }]
+readme = "README.md"
+dependencies = [
+    # Rendering
+    "pi3d>=2.55",
+    "Pillow>=10.2.0",
+    "defusedxml",                # required by PIL.Image.getxmp() for safe XML parsing
+    "numpy",
+    "ninepatch>=0.2.0",
+    "pi_heif>=0.8.0",            # HEIF that slips through if we ever serve originals
+
+    # Config / IO
+    "PyYAML",
+    "requests",
+
+    # Video (replaces picframe's VLC subprocess stack)
+    "python-mpv>=1.0.0",
+
+    # Phase-2 deps listed up front so the env doesn't churn
+    "paho-mqtt>=2.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "responses", "ruff", "mypy"]
+
+[project.scripts]
+immframe = "immframe.start:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"immframe._defaults" = ["*.yaml"]
+"immframe.viewer" = ["data/**/*"]
