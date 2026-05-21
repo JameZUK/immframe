@@ -50,6 +50,3 @@ control:
     auth: true
     username: ""
     password: ""
-  peripherals:
-    enabled: true
-    input_type: keyboard                   # keyboard | mouse | touch | none

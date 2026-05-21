@@ -30,7 +30,6 @@ import yaml
 
 
 SelectionMode = Literal["random", "album", "smart"]
-InputType = Literal["keyboard", "mouse", "touch", "none"]
 
 _DEFAULT_YAML_PATH = Path(__file__).parent / "_defaults" / "default.yaml"
 _SEARCH_PATHS = (
@@ -122,16 +121,9 @@ class HttpConfig:
 
 
 @dataclass
-class PeripheralsConfig:
-    enabled: bool = True
-    input_type: InputType = "keyboard"
-
-
-@dataclass
 class ControlConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     http: HttpConfig = field(default_factory=HttpConfig)
-    peripherals: PeripheralsConfig = field(default_factory=PeripheralsConfig)
 
 
 @dataclass
@@ -214,7 +206,6 @@ class Config:
         ctrl_raw = data.get("control", {})
         mqtt_raw = ctrl_raw.get("mqtt", {})
         http_raw = ctrl_raw.get("http", {})
-        per_raw = ctrl_raw.get("peripherals", {})
         control = ControlConfig(
             mqtt=MqttConfig(
                 enabled=bool(mqtt_raw.get("enabled", False)),
@@ -232,14 +223,6 @@ class Config:
                 username=http_raw.get("username", ""),
                 password=http_raw.get("password", ""),
             ),
-            peripherals=PeripheralsConfig(
-                enabled=bool(per_raw.get("enabled", True)),
-                input_type=per_raw.get("input_type", "keyboard"),
-            ),
         )
-        if control.peripherals.input_type not in ("keyboard", "mouse", "touch", "none"):
-            raise ValueError(
-                f"control.peripherals.input_type invalid: {control.peripherals.input_type!r}"
-            )
 
         return cls(immich=immich, selection=selection, video=video, viewer=viewer, control=control)

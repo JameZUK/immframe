@@ -2,8 +2,8 @@
 
 A picture-frame slideshow that streams photos and videos directly from an
 [Immich](https://immich.app) server. Designed for a Raspberry Pi wired to a
-TV / dedicated display, with optional Home Assistant integration via MQTT
-(coming in Phase 2).
+TV / dedicated display, with Home Assistant integration via MQTT and a small
+REST API.
 
 Derived from [picframe](https://github.com/helgeerbe/picframe) — the
 pi3d-based renderer, mat compositor and overlay text code are vendored from
@@ -44,15 +44,13 @@ UX picframe got right.
 
 ## Status
 
-**Phase 1** — slideshow + selection works. No control plane yet (no MQTT,
-no HTTP control, no touch input). Set the mode in config, run, `Ctrl-C`
-to quit.
+**Phase 1 + 2 complete.** Slideshow with three switchable selection modes,
+MQTT control with Home Assistant auto-discovery, and a small REST API for
+monitoring and command. The frame is controlled entirely via HA or HTTP —
+there's no on-device input (no keyboard, mouse, or touch).
 
-**Phase 2** will add MQTT (Home Assistant discovery), HTTP control endpoints
-and touch / mouse / keyboard input.
-
-34 unit tests pass against the client, config loader, selectors and prefetch
-worker.
+93 unit tests across config, Immich client, selectors, prefetch worker,
+MQTT, and HTTP.
 
 ## Quick start
 
@@ -73,9 +71,9 @@ chmod 600 ~/.config/immframe/config.yaml
 .venv/bin/immframe
 ```
 
-The single config file holds everything — Immich URL, API key, (Phase 2)
-MQTT and HTTP credentials. Any string value supports `${ENV_VAR}`
-substitution if you'd rather keep secrets out of the file:
+The single config file holds everything — Immich URL, API key, MQTT and
+HTTP credentials. Any string value supports `${ENV_VAR}` substitution if
+you'd rather keep secrets out of the file:
 
 ```yaml
 immich:
