@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 import requests
 
@@ -172,6 +173,33 @@ class ImmichClient:
                 os.replace(tmp, dest)
         except requests.RequestException as e:
             raise ImmichError(f"thumbnail {asset_id}: {e}") from e
+
+    @contextmanager
+    def stream_preview(self, asset_id: str) -> Iterator[requests.Response]:
+        """Yield a streaming `requests.Response` for the preview JPEG.
+
+        Used by the HTTP control plane to proxy image bytes to clients
+        without ever writing to disk. Caller reads via `.iter_content()`
+        and may forward `Content-Type` / `Content-Length` headers.
+
+        Raises `ImmichError` on any failure.
+        """
+        url = self._url(f"/assets/{asset_id}/thumbnail")
+        try:
+            r = self._session.get(
+                url,
+                params={"size": self.PREVIEW_SIZE},
+                stream=True,
+                timeout=self._timeout,
+            )
+        except requests.RequestException as e:
+            raise ImmichError(f"thumbnail stream {asset_id}: {e}") from e
+        try:
+            if r.status_code >= 400:
+                raise ImmichError(f"thumbnail stream {asset_id}: {r.status_code}")
+            yield r
+        finally:
+            r.close()
 
     # ── Video (consumed by python-mpv) ──────────────────────────────────
     def video_play_args(self, asset_id: str) -> tuple[str, dict[str, str]]:

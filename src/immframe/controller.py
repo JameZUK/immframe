@@ -141,6 +141,7 @@ class Controller:
         self._viewer = None
         self._video_player = None
         self._mqtt = None
+        self._http = None
 
     # ── Lifecycle ───────────────────────────────────────────────────────
     def start(self) -> None:
@@ -174,6 +175,15 @@ class Controller:
             except Exception as e:
                 log.warning("MQTT disabled — %s", e)
                 self._mqtt = None
+
+        if self._config.control.http.enabled:
+            try:
+                from .interfaces.http import HttpInterface
+                self._http = HttpInterface(self._config.control.http, self, self._client)
+                self._http.start()
+            except Exception as e:
+                log.warning("HTTP disabled — %s", e)
+                self._http = None
 
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
@@ -264,6 +274,12 @@ class Controller:
 
     def stop(self) -> None:
         self._stop_evt.set()
+        if self._http is not None:
+            try:
+                self._http.stop()
+            except Exception as e:
+                log.debug("http stop: %s", e)
+            self._http = None
         if self._mqtt is not None:
             try:
                 self._mqtt.stop()
