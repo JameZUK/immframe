@@ -13,7 +13,7 @@ HA, and a complete Lovelace card example.
 | Entity | Type | Purpose |
 |---|---|---|
 | `switch.immframe_paused` | switch | Pause / resume the slideshow |
-| `select.immframe_selection_mode` | select | random / album / smart |
+| `select.immframe_selection_mode` | select | random / album / smart / scene |
 | `text.immframe_album_ids` | text | Comma-separated album UUIDs |
 | `text.immframe_smart_query` | text | CLIP search query |
 | `button.immframe_next` | button | Force-advance to the next slide |
@@ -23,7 +23,7 @@ HA, and a complete Lovelace card example.
 | `number.immframe_fade_time` | number (0–30 s) | Crossfade duration |
 | `text.immframe_show_text` | text | Overlay fields (comma-separated, subset of `title,caption,name,date,location,folder`) |
 | `switch.immframe_show_clock` | switch | Show / hide the clock overlay |
-| `sensor.immframe_current_asset` | sensor | Current asset UUID; attributes carry file, taken_at, city, country, camera, kind, favorite |
+| `sensor.immframe_current_asset` | sensor | Current asset UUID; attributes carry file, taken_at, city, country, camera, kind, favorite, scene |
 
 A device with these entities is created with the identifier set to your
 `control.mqtt.base_topic` (default `immframe`).
@@ -225,6 +225,47 @@ automation:
         data:
           value: "<your-holiday-album-uuid>"
 ```
+
+## Scene mode
+
+`scene` is a selection mode that surfaces Immich's automatic CLIP scene
+classification: Immich groups photos into themes like "beach",
+"mountain", "forest", "wedding", etc. via the [Smart Search](https://immich.app/docs/features/smart-search)
+ML model. Pick this mode and immframe will:
+
+1. Query `/search/explore` for the available scene labels.
+2. Pick one at random.
+3. Slideshow ~25 photos from that scene.
+4. Rotate to a new random scene.
+5. Repeat.
+
+You don't need to configure anything — there's no list to maintain. Just
+switch the mode:
+
+```yaml
+service: select.select_option
+target:
+  entity_id: select.immframe_selection_mode
+data:
+  option: scene
+```
+
+The currently-active scene is published as the `scene` attribute on
+`sensor.immframe_current_asset`. A template sensor surfaces it:
+
+```yaml
+template:
+  - sensor:
+      - name: "immframe Current Scene"
+        state: "{{ state_attr('sensor.immframe_current_asset', 'scene') or 'none' }}"
+```
+
+You can show it on the dashboard with a regular `entities` card.
+
+> Scene mode requires Immich to have finished running smart-search/CLIP
+> processing on your library. Check Immich → Administration → Jobs.
+> If the jobs are still queued you'll see no scenes — the selector logs
+> a warning and the slideshow just keeps the previous slide on screen.
 
 ## Troubleshooting
 

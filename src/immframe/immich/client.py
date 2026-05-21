@@ -155,6 +155,33 @@ class ImmichClient:
         assets = data.get("assets", [])
         return [_to_asset(d) for d in assets]
 
+    def explore(self) -> dict[str, list[str]]:
+        """GET /search/explore — return `{field_name: [values]}`.
+
+        Immich's Explore endpoint surfaces auto-discovered groupings. The
+        most useful key is "things" (CLIP scene labels — "beach",
+        "mountain", "forest", etc.); "people" carries named faces.
+
+        Returns an empty dict / empty lists if Immich hasn't run
+        classification on the library yet.
+        """
+        data = self._get("/search/explore")
+        if not isinstance(data, list):
+            raise ImmichError("/search/explore: expected list")
+        out: dict[str, list[str]] = {}
+        for facet in data:
+            if not isinstance(facet, dict):
+                continue
+            name = facet.get("fieldName")
+            items = facet.get("items") or []
+            if not isinstance(name, str) or not isinstance(items, list):
+                continue
+            values = [it.get("value") for it in items
+                      if isinstance(it, dict) and isinstance(it.get("value"), str) and it.get("value")]
+            if values:
+                out[name] = values
+        return out
+
     # ── Bytes ───────────────────────────────────────────────────────────
     def download_preview(self, asset_id: str, dest: Path) -> None:
         """Stream the preview JPEG to `dest`. Atomic (tmp file + rename)."""

@@ -38,6 +38,7 @@ class _StubController:
         self.time_delay = 60.0
         self.fade_time = 4.0
         self.current_asset: Asset | None = None
+        self.current_scene: str | None = None
         self.next_calls = 0
 
     def next(self) -> None:
@@ -133,10 +134,30 @@ def test_state_snapshot_shape():
         body = r.json()
         assert body["paused"] is True
         assert body["selection_mode"] == "random"
+        assert body["current_scene"] is None
         assert body["current_asset"]["id"] == "abc12345-aaaa-bbbb-cccc-1234567890ab"
         assert body["current_asset"]["city"] == "Reykjavík"
         assert body["current_asset"]["camera"] == "Canon EOS R6"
         assert body["current_asset"]["kind"] == "IMAGE"
+
+
+def test_state_includes_current_scene_when_in_scene_mode():
+    with _server() as (base, ctrl, _):
+        ctrl.selection_mode = "scene"
+        ctrl.current_scene = "beach"
+        r = requests.get(f"{base}/api/state", timeout=2.0, auth=_auth())
+        body = r.json()
+        assert body["selection_mode"] == "scene"
+        assert body["current_scene"] == "beach"
+
+
+def test_post_selection_mode_accepts_scene():
+    with _server() as (base, ctrl, _):
+        r = requests.post(
+            f"{base}/api/selection_mode", json={"value": "scene"}, timeout=2.0, auth=_auth(),
+        )
+        assert r.status_code == 200
+        assert ctrl.selection_mode == "scene"
 
 
 def test_state_returns_null_current_asset_initially():

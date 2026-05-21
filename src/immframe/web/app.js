@@ -59,6 +59,14 @@ function render(state) {
     $("album-ids").value = (state.album_ids || []).join(", ");
     $("smart-query").value = state.smart_query || "";
 
+    // Scene mode is read-only on the dashboard: Immich rotates the scene
+    // for us; we just surface what's currently driving the slideshow.
+    const sceneActive = state.selection_mode === "scene";
+    $("scene-row").hidden = !sceneActive;
+    if (sceneActive) {
+      $("current-scene").textContent = state.current_scene || "(loading)";
+    }
+
     $("brightness").value = state.brightness;
     $("brightness-value").textContent = Number(state.brightness).toFixed(2);
 

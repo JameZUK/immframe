@@ -35,6 +35,7 @@ class _StubController:
         self.time_delay = 60.0
         self.fade_time = 4.0
         self.current_asset: Asset | None = None
+        self.current_scene: str | None = None
         self.next_calls = 0
 
     def next(self):
@@ -101,6 +102,24 @@ def test_attrs_of_current_asset():
     assert attrs["country"] == "Iceland"
     assert attrs["camera"] == "Canon EOS R6"
     assert attrs["kind"] == "IMAGE"
+    assert attrs["scene"] is None     # no scene in default state
+
+
+def test_attrs_includes_current_scene():
+    c = _StubController()
+    c.current_asset = _asset("xyz")
+    c.current_scene = "beach"
+    e = next(e for e in ENTITIES if e.object_id == "current_asset")
+    attrs = _attrs_of(c, e)
+    assert attrs["scene"] == "beach"
+
+
+def test_apply_cmd_selection_mode_scene():
+    from immframe.interfaces.mqtt import _apply_cmd
+    c = _StubController()
+    e = next(e for e in ENTITIES if e.object_id == "selection_mode")
+    _apply_cmd(c, e, "scene")
+    assert c.selection_mode == "scene"
 
 
 def test_apply_cmd_paused():
@@ -291,7 +310,7 @@ def test_on_connect_publishes_select_options(mqtt_mod):
         if c.args[0].startswith(f"{DISCOVERY_PREFIX}/select/")
     )
     payload = json.loads(select_call.args[1])
-    assert payload["options"] == ["random", "album", "smart"]
+    assert payload["options"] == ["random", "album", "smart", "scene"]
 
 
 def test_on_connect_publishes_state(mqtt_mod):

@@ -177,6 +177,63 @@ def test_random_assets_non_list_raises():
 
 
 @responses.activate
+def test_explore_returns_facet_values():
+    responses.add(
+        responses.GET,
+        f"{BASE}/api/search/explore",
+        json=[
+            {"fieldName": "things", "items": [
+                {"value": "beach", "data": _asset_json("a")},
+                {"value": "mountain", "data": _asset_json("b")},
+            ]},
+            {"fieldName": "people", "items": [
+                {"value": "Alice", "data": _asset_json("c")},
+            ]},
+        ],
+    )
+    c = ImmichClient(BASE, "k")
+    out = c.explore()
+    assert out["things"] == ["beach", "mountain"]
+    assert out["people"] == ["Alice"]
+
+
+@responses.activate
+def test_explore_ignores_malformed_items():
+    responses.add(
+        responses.GET,
+        f"{BASE}/api/search/explore",
+        json=[
+            {"fieldName": "things", "items": [
+                {"value": "beach"},
+                {"value": ""},
+                {"no_value": "x"},
+                "not a dict",
+            ]},
+            "garbage",
+            {"items": []},  # missing fieldName
+        ],
+    )
+    c = ImmichClient(BASE, "k")
+    out = c.explore()
+    assert out == {"things": ["beach"]}
+
+
+@responses.activate
+def test_explore_empty_when_immich_has_no_classification():
+    responses.add(responses.GET, f"{BASE}/api/search/explore", json=[])
+    c = ImmichClient(BASE, "k")
+    assert c.explore() == {}
+
+
+@responses.activate
+def test_explore_non_list_raises():
+    responses.add(responses.GET, f"{BASE}/api/search/explore", json={"oops": True})
+    c = ImmichClient(BASE, "k")
+    with pytest.raises(ImmichError):
+        c.explore()
+
+
+@responses.activate
 def test_search_metadata_passes_filters():
     captured = {}
 

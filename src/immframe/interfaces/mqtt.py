@@ -64,7 +64,7 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("switch", "paused", "Paused", icon="mdi:pause"),
     Entity(
         "select", "selection_mode", "Selection mode",
-        options=("random", "album", "smart"), icon="mdi:image-multiple",
+        options=("random", "album", "smart", "scene"), icon="mdi:image-multiple",
     ),
     Entity("text", "album_ids", "Album IDs", icon="mdi:image-album"),
     Entity("text", "smart_query", "Smart query", icon="mdi:magnify"),
@@ -132,8 +132,9 @@ def _attrs_of(controller: "Controller", entity: Entity) -> dict | None:
     """Optional JSON attributes for sensor-type entities. None = no attrs."""
     if entity.object_id == "current_asset":
         a = controller.current_asset
+        scene = controller.current_scene
         if a is None:
-            return {}
+            return {"scene": scene} if scene is not None else {}
         camera = " ".join(p for p in (a.camera_make, a.camera_model) if p)
         return {
             "file": a.original_file_name,
@@ -143,6 +144,7 @@ def _attrs_of(controller: "Controller", entity: Entity) -> dict | None:
             "camera": camera or None,
             "kind": a.kind.value,
             "favorite": a.favorite,
+            "scene": scene,
         }
     return None
 

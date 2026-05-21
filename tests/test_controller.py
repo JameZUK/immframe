@@ -168,3 +168,37 @@ def test_setters_safe_without_viewer():
     assert c.display_is_on is False
     assert c.show_clock is True
     assert c.show_text == ["title"]
+
+
+# ── Selection modes ────────────────────────────────────────────────────
+
+
+def test_selection_mode_accepts_scene():
+    c = _controller()
+    c.selection_mode = "scene"
+    assert c.selection_mode == "scene"
+
+
+def test_selection_mode_rejects_unknown():
+    c = _controller()
+    with pytest.raises(ValueError):
+        c.selection_mode = "everything"
+
+
+def test_current_scene_none_outside_scene_mode():
+    c = _controller()
+    assert c.current_scene is None
+    c.selection_mode = "album"
+    assert c.current_scene is None
+
+
+def test_current_scene_delegates_to_scene_selector():
+    c = _controller()
+    c.selection_mode = "scene"
+    # The selector starts with no scene chosen yet
+    assert c.current_scene is None
+    # Simulate the selector picking one (without making a real network call)
+    from immframe.immich.selector import SceneSelector
+    assert isinstance(c._selector, SceneSelector)
+    c._selector._current_scene = "beach"
+    assert c.current_scene == "beach"

@@ -30,10 +30,13 @@ UX picframe got right.
 
 ## Features
 
-- Three selection modes, switchable at runtime:
+- Four selection modes, switchable at runtime:
   - **Random** — `POST /api/search/random` across the whole library
   - **Album** — random shuffle within one or more albums
   - **Smart** — CLIP search (e.g. *"family at the beach"*)
+  - **Scene** — Immich's auto-discovered CLIP scene labels; picks a random
+    scene (*beach*, *mountain*, *wedding*, …), shows ~25 photos from it,
+    then rotates to a new scene. Zero config.
 - Crossfades, blur edges, Ken Burns, optional mat compositing (from
   picframe's renderer, unchanged)
 - Date / location overlay text — fields come straight from Immich, no

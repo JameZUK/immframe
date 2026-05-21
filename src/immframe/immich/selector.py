@@ -120,3 +120,81 @@ class SmartSelector:
         except ImmichError as e:
             log.warning("search_smart failed: %s", e)
             return []
+
+
+class SceneSelector:
+    """Themed slideshow driven by Immich's CLIP scene classification.
+
+    Workflow:
+        1. Query /search/explore to discover scene labels ("beach",
+           "mountain", "forest", ...). The `field_name` arg picks which
+           facet — default "things" is CLIP scenes; "people" surfaces
+           named faces.
+        2. Pick a random scene from that list.
+        3. Use smart search to fetch a pool of assets matching that scene.
+        4. Iterate the pool until empty, then rotate to a fresh scene.
+
+    The current scene name is exposed via `current_scene` so the controller
+    can publish it.
+
+    Network failures (Explore unavailable, smart search returns nothing)
+    surface as empty batches; the prefetch worker backs off.
+    """
+
+    DEFAULT_FIELD = "things"
+
+    def __init__(
+        self,
+        client: ImmichClient,
+        *,
+        field_name: str = DEFAULT_FIELD,
+        pool_size: int = 25,
+    ) -> None:
+        self._client = client
+        self._field_name = field_name
+        self._pool_size = pool_size
+        self._lock = threading.Lock()
+        self._scenes: list[str] = []
+        self._current_scene: str | None = None
+        self._pool: list[Asset] = []
+
+    @property
+    def current_scene(self) -> str | None:
+        with self._lock:
+            return self._current_scene
+
+    def next_batch(self, n: int) -> list[Asset]:
+        with self._lock:
+            if not self._pool:
+                self._rotate_scene()
+            if not self._pool:
+                return []
+            take = min(n, len(self._pool))
+            out = self._pool[:take]
+            self._pool = self._pool[take:]
+            return out
+
+    def _rotate_scene(self) -> None:
+        if not self._scenes:
+            try:
+                explore = self._client.explore()
+            except ImmichError as e:
+                log.warning("explore failed: %s", e)
+                return
+            self._scenes = list(explore.get(self._field_name, []))
+            if not self._scenes:
+                log.info(
+                    "explore returned no %r facet — has Immich finished "
+                    "classifying the library?", self._field_name,
+                )
+                return
+
+        self._current_scene = random.choice(self._scenes)
+        log.info("scene rotation -> %r", self._current_scene)
+        try:
+            pool = self._client.search_smart(self._current_scene, count=self._pool_size)
+        except ImmichError as e:
+            log.warning("scene smart-search(%r) failed: %s", self._current_scene, e)
+            pool = []
+        random.shuffle(pool)
+        self._pool = pool

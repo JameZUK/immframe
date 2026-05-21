@@ -28,6 +28,7 @@ from .immich.selector import (
     AlbumSelector,
     AssetSelector,
     RandomSelector,
+    SceneSelector,
     SmartSelector,
 )
 
@@ -360,7 +361,7 @@ class Controller:
 
     @selection_mode.setter
     def selection_mode(self, mode: SelectionMode) -> None:
-        if mode not in ("random", "album", "smart"):
+        if mode not in ("random", "album", "smart", "scene"):
             raise ValueError(f"unknown selection_mode: {mode!r}")
         self._selection_mode = mode
         self._selector = self._build_selector(mode)
@@ -483,6 +484,14 @@ class Controller:
     def current_asset(self) -> Asset | None:
         return self._current_asset
 
+    @property
+    def current_scene(self) -> str | None:
+        """When `selection_mode == "scene"`, the label currently driving
+        selection; None otherwise."""
+        if isinstance(self._selector, SceneSelector):
+            return self._selector.current_scene
+        return None
+
     # ── Internals ───────────────────────────────────────────────────────
     def _sync_to_viewer(self) -> None:
         """Apply controller-held shadow state to the live viewer.
@@ -521,4 +530,6 @@ class Controller:
             return AlbumSelector(self._client, self._album_ids)
         if mode == "smart":
             return SmartSelector(self._client, self._smart_query)
+        if mode == "scene":
+            return SceneSelector(self._client)
         raise ValueError(f"unknown selection_mode: {mode!r}")

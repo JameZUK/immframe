@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("next", help="Force-advance to the next slide")
 
     mode_p = sub.add_parser("mode", help="Set selection mode")
-    mode_p.add_argument("mode", choices=("random", "album", "smart"))
+    mode_p.add_argument("mode", choices=("random", "album", "smart", "scene"))
 
     br_p = sub.add_parser("brightness", help="Set brightness (0.0 - 1.0)")
     br_p.add_argument("value", type=float)

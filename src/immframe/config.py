@@ -29,7 +29,7 @@ from typing import Any, Literal
 import yaml
 
 
-SelectionMode = Literal["random", "album", "smart"]
+SelectionMode = Literal["random", "album", "smart", "scene"]
 
 _DEFAULT_YAML_PATH = Path(__file__).parent / "_defaults" / "default.yaml"
 _SEARCH_PATHS = (
@@ -191,7 +191,7 @@ class Config:
             smart_query=sel_raw.get("smart_query", ""),
             prefetch_count=int(sel_raw.get("prefetch_count", 5)),
         )
-        if selection.default_mode not in ("random", "album", "smart"):
+        if selection.default_mode not in ("random", "album", "smart", "scene"):
             raise ValueError(f"selection.default_mode invalid: {selection.default_mode!r}")
 
         vid_raw = data.get("video", {})

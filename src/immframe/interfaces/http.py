@@ -56,7 +56,7 @@ log = logging.getLogger(__name__)
 _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
-_SELECTION_MODES = ("random", "album", "smart")
+_SELECTION_MODES = ("random", "album", "smart", "scene")
 _SHOW_TEXT_KEYS = ("title", "caption", "name", "date", "location", "folder")
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -332,6 +332,7 @@ class _Handler(BaseHTTPRequestHandler):
             "selection_mode": c.selection_mode,
             "album_ids": c.album_ids,
             "smart_query": c.smart_query,
+            "current_scene": c.current_scene,
             "brightness": c.brightness,
             "display_is_on": c.display_is_on,
             "show_text": c.show_text,
