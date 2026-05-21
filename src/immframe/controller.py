@@ -140,6 +140,7 @@ class Controller:
         # Lazily constructed in start() so module import doesn't pull pi3d/mpv
         self._viewer = None
         self._video_player = None
+        self._mqtt = None
 
     # ── Lifecycle ───────────────────────────────────────────────────────
     def start(self) -> None:
@@ -164,6 +165,16 @@ class Controller:
             log.warning("Immich ping failed at startup; will retry on first prefetch.")
 
         self._prefetch.start()
+
+        if self._config.control.mqtt.enabled:
+            try:
+                from .interfaces.mqtt import MqttInterface
+                self._mqtt = MqttInterface(self._config.control.mqtt, self)
+                self._mqtt.start()
+            except Exception as e:
+                log.warning("MQTT disabled — %s", e)
+                self._mqtt = None
+
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
 
@@ -212,6 +223,7 @@ class Controller:
                     continue
 
                 self._current_asset = asset
+                self._publish_state()
                 pic = Pic(str(new_path), asset)
                 pics_arg = [pic, None]                  # picframe slideshow_is_running shape
                 loop_running, _, _ = viewer.slideshow_is_running(
@@ -242,6 +254,7 @@ class Controller:
             return
         url, headers = self._client.video_play_args(asset.id)
         self._current_asset = asset
+        self._publish_state()
         end_evt = threading.Event()
         self._video_player.play(url, headers=headers, on_end=end_evt.set)
         while not end_evt.wait(timeout=0.5):
@@ -251,6 +264,12 @@ class Controller:
 
     def stop(self) -> None:
         self._stop_evt.set()
+        if self._mqtt is not None:
+            try:
+                self._mqtt.stop()
+            except Exception as e:
+                log.debug("mqtt stop: %s", e)
+            self._mqtt = None
         if self._prefetch is not None:
             self._prefetch.stop()
         if self._video_player is not None:
@@ -263,6 +282,15 @@ class Controller:
                 log.debug("viewer stop: %s", e)
         self._client.close()
 
+    def _publish_state(self) -> None:
+        """Notify control plane of a state change. No-op if no MQTT/HTTP wired."""
+        m = self._mqtt
+        if m is not None:
+            try:
+                m.publish_state()
+            except Exception as e:
+                log.debug("publish_state: %s", e)
+
     # ── Basic transport ─────────────────────────────────────────────────
     def next(self) -> None:
         self._force_next_evt.set()
@@ -274,6 +302,7 @@ class Controller:
     @paused.setter
     def paused(self, value: bool) -> None:
         self._paused = bool(value)
+        self._publish_state()
 
     # ── Selection ───────────────────────────────────────────────────────
     @property
@@ -288,6 +317,7 @@ class Controller:
         self._selector = self._build_selector(mode)
         self._prefetch.set_selector(self._selector)
         self._force_next_evt.set()
+        self._publish_state()
 
     @property
     def album_ids(self) -> list[str]:
@@ -300,6 +330,7 @@ class Controller:
             self._selector.set_album_ids(self._album_ids)
             self._prefetch.drain()
             self._force_next_evt.set()
+        self._publish_state()
 
     @property
     def smart_query(self) -> str:
@@ -312,6 +343,7 @@ class Controller:
             self._selector.set_query(q)
             self._prefetch.drain()
             self._force_next_evt.set()
+        self._publish_state()
 
     # ── State exposure ──────────────────────────────────────────────────
     @property
