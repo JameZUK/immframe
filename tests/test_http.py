@@ -480,3 +480,50 @@ def test_wrong_username_unauthorized():
     with _server() as (base, _, _):
         r = requests.get(f"{base}/api/state", timeout=2.0, auth=("nobody", "hunter2"))
         assert r.status_code == 401
+
+
+# ── SPA / static assets ────────────────────────────────────────────────────
+
+
+def test_index_html_served_at_root():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/", timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert r.headers["Content-Type"].startswith("text/html")
+        assert "<title>immframe</title>" in r.text
+
+
+def test_static_css_served():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/static/app.css", timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert r.headers["Content-Type"].startswith("text/css")
+
+
+def test_static_js_served():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/static/app.js", timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert r.headers["Content-Type"].startswith("application/javascript")
+
+
+def test_static_requires_auth():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/", timeout=2.0)
+        assert r.status_code == 401
+
+
+def test_static_only_whitelisted_paths_served():
+    """Static serving is allow-listed by URL key — only `/`, `/static/app.css`
+    and `/static/app.js` are valid. Anything else under /static/ 404s.
+    (Note: `..` segments in URLs are normalised by HTTP clients before they
+    reach the server, so the whitelist matters more than path-traversal
+    checks at the server.)"""
+    with _server() as (base, _, _):
+        for bad in [
+            "/static/index.html",       # not whitelisted under /static
+            "/static/",
+            "/static/missing.js",
+        ]:
+            r = requests.get(f"{base}{bad}", timeout=2.0, auth=_auth())
+            assert r.status_code == 404, f"should 404: {bad!r}"

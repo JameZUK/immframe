@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>immframe</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>immframe</h1>
+    <span id="connection" class="badge" data-status="loading">…</span>
+  </header>
+
+  <main class="app">
+    <section class="card current">
+      <div class="image-wrap">
+        <img id="current-image" alt="" loading="lazy">
+        <div id="image-placeholder" class="image-placeholder">no asset yet</div>
+      </div>
+      <dl class="meta">
+        <dt>File</dt><dd id="meta-file">—</dd>
+        <dt>Taken</dt><dd id="meta-date">—</dd>
+        <dt>Where</dt><dd id="meta-where">—</dd>
+        <dt>Camera</dt><dd id="meta-camera">—</dd>
+        <dt>Kind</dt><dd id="meta-kind">—</dd>
+      </dl>
+    </section>
+
+    <section class="card transport">
+      <button id="btn-pause" type="button">Pause</button>
+      <button id="btn-next" type="button">Next ▶</button>
+    </section>
+
+    <section class="card selection">
+      <h2>Selection</h2>
+      <div class="row">
+        <label>Mode</label>
+        <select id="mode">
+          <option value="random">Random</option>
+          <option value="album">Album</option>
+          <option value="smart">Smart</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Albums</label>
+        <input id="album-ids" type="text" placeholder="uuid-1, uuid-2" autocomplete="off">
+      </div>
+      <div class="row">
+        <label>Query</label>
+        <input id="smart-query" type="text" placeholder="family at the beach" autocomplete="off">
+      </div>
+    </section>
+
+    <section class="card slideshow">
+      <h2>Slideshow</h2>
+      <div class="row">
+        <label>Slide duration <span id="time-delay-value" class="num">60s</span></label>
+        <input id="time-delay" type="range" min="1" max="600" step="1">
+      </div>
+      <div class="row">
+        <label>Fade duration <span id="fade-time-value" class="num">4s</span></label>
+        <input id="fade-time" type="range" min="0" max="30" step="0.5">
+      </div>
+      <div class="row">
+        <label>Brightness <span id="brightness-value" class="num">1.00</span></label>
+        <input id="brightness" type="range" min="0" max="1" step="0.05">
+      </div>
+    </section>
+
+    <section class="card display">
+      <h2>Display</h2>
+      <div class="row toggle">
+        <label for="display-is-on">Display on</label>
+        <input id="display-is-on" type="checkbox">
+      </div>
+      <div class="row toggle">
+        <label for="show-clock">Clock overlay</label>
+        <input id="show-clock" type="checkbox">
+      </div>
+      <fieldset class="show-text">
+        <legend>Overlay fields</legend>
+        <label><input type="checkbox" data-st-key="title"> Title</label>
+        <label><input type="checkbox" data-st-key="caption"> Caption</label>
+        <label><input type="checkbox" data-st-key="name"> Name</label>
+        <label><input type="checkbox" data-st-key="date"> Date</label>
+        <label><input type="checkbox" data-st-key="location"> Location</label>
+        <label><input type="checkbox" data-st-key="folder"> Folder</label>
+      </fieldset>
+    </section>
+
+    <footer class="footer">
+      <span>v<span id="version">…</span></span>
+    </footer>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

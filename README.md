@@ -41,6 +41,15 @@ UX picframe got right.
 - Direct video streaming via [python-mpv](https://github.com/jaseg/python-mpv)
   with KMS/DRM output on the Pi — no local download, no transcode
 - Graceful degradation if Immich is briefly unavailable
+- Home Assistant integration via MQTT auto-discovery — see
+  [docs/home-assistant.md](./docs/home-assistant.md) for entities and a
+  ready-made Lovelace card
+- Built-in web dashboard at `http://<pi-ip>:8080/` — phone-friendly remote
+  for pause / next / mode / brightness / overlay fields / clock
+- CLI for ops:
+  `immframe state`, `immframe pause`, `immframe next`,
+  `immframe brightness 0.5`, `immframe mode smart`,
+  `immframe query "sunsets"`, `immframe random 5`, etc.
 
 ## Status
 

@@ -38,6 +38,7 @@ import secrets
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import __version__
@@ -57,6 +58,17 @@ _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
 _SELECTION_MODES = ("random", "album", "smart")
 _SHOW_TEXT_KEYS = ("title", "caption", "name", "date", "location", "folder")
+
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+# Strict whitelist for static-file serving. The key is the URL path, the
+# value is (relative-filename, content-type). No filesystem path is ever
+# built from user input.
+_STATIC: dict[str, tuple[str, str]] = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/static/app.css": ("app.css", "text/css; charset=utf-8"),
+    "/static/app.js": ("app.js", "application/javascript; charset=utf-8"),
+}
 
 _POST_PATHS = frozenset({
     "/api/paused",
@@ -213,6 +225,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._healthz()
         if not self._authed():
             return self._unauthorized()
+        if self.path in _STATIC:
+            return self._static(self.path)
         if self.path == "/api/version":
             return self._version()
         if self.path == "/api/state":
@@ -326,6 +340,21 @@ class _Handler(BaseHTTPRequestHandler):
             "fade_time": c.fade_time,
             "current_asset": asset_obj,
         })
+
+    def _static(self, url_path: str) -> None:
+        filename, content_type = _STATIC[url_path]
+        path = _WEB_DIR / filename
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            log.warning("static read %s: %s", filename, e)
+            raise _HttpError(HTTPStatus.INTERNAL_SERVER_ERROR, "static file missing")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _image(self, asset_id: str) -> None:
         # Belt and braces — the path regex already enforces this, but double-check.
