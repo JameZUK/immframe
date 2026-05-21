@@ -53,18 +53,15 @@ For development (tests, lint):
 
 ## 3. Configure
 
+Everything — Immich URL, API key, Phase-2 MQTT/HTTP credentials, viewer
+options — lives in a single file: `~/.config/immframe/config.yaml`.
+
 ```bash
 mkdir -p ~/.config/immframe
-printf '%s' 'YOUR-IMMICH-API-KEY' > ~/.config/immframe/api_key
-chmod 600 ~/.config/immframe/api_key
-```
-
-Then `~/.config/immframe/config.yaml`:
-
-```yaml
+cat > ~/.config/immframe/config.yaml <<'EOF'
 immich:
   url: https://immich.example.local        # your Immich server, no trailing slash
-  api_key_file: ~/.config/immframe/api_key
+  api_key: YOUR-IMMICH-API-KEY             # required
 
 selection:
   default_mode: random                     # random | album | smart
@@ -75,7 +72,28 @@ viewer:
   time_delay: 60                           # seconds per slide
   fade_time: 4
   show_text: "date location"               # "" to hide overlay
+EOF
+chmod 600 ~/.config/immframe/config.yaml
 ```
+
+> **Important:** the config holds secrets — always `chmod 600`.
+
+### Keeping secrets out of the file
+
+If you'd rather not paste credentials into the YAML (e.g. for committing
+config to a private repo, or feeding via systemd's `EnvironmentFile`), any
+string value supports `${ENV_VAR}` substitution:
+
+```yaml
+immich:
+  url: https://immich.example.local
+  api_key: ${IMMICH_API_KEY}
+```
+
+Missing env vars expand to `""` (which will fail validation for required
+fields like `api_key`, so you'll know immediately).
+
+### Default keys
 
 Everything else inherits from packaged defaults — see
 [`src/immframe/_defaults/default.yaml`](./src/immframe/_defaults/default.yaml)
@@ -150,7 +168,7 @@ systemctl --user restart immframe          # if running under systemd
 
 | Symptom | Likely cause |
 |---|---|
-| `ImmichError: ... 401` | API key wrong or `api_key_file` is empty |
+| `ImmichError: ... 401` | API key wrong or `immich.api_key` empty in config |
 | `ImmichError: ... ConnectionError` | URL wrong, or Immich unreachable from the Pi |
 | Black screen forever | No assets matched the current selection — try `--log-level DEBUG` |
 | `ImportError` for pi3d deps | Missing SDL2 system packages (step 1) |

@@ -63,14 +63,23 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 
 mkdir -p ~/.config/immframe
-printf '%s' 'YOUR-IMMICH-API-KEY' > ~/.config/immframe/api_key
 cat > ~/.config/immframe/config.yaml <<'EOF'
 immich:
   url: https://immich.example.local
-  api_key_file: ~/.config/immframe/api_key
+  api_key: YOUR-IMMICH-API-KEY
 EOF
+chmod 600 ~/.config/immframe/config.yaml
 
 .venv/bin/immframe
+```
+
+The single config file holds everything — Immich URL, API key, (Phase 2)
+MQTT and HTTP credentials. Any string value supports `${ENV_VAR}`
+substitution if you'd rather keep secrets out of the file:
+
+```yaml
+immich:
+  api_key: ${IMMICH_API_KEY}
 ```
 
 See **[INSTALL.md](./INSTALL.md)** for the full setup including system

@@ -1,49 +1,55 @@
 # immframe — default configuration.
 # User config is deep-merged on top of this. Anything you don't override
 # inherits the value below.
+#
+# Secrets (api_key, mqtt password, http password) live inline. The config
+# file MUST be chmod 600. Any string value supports ${ENV_VAR} substitution
+# from the process environment, so you can keep secrets out of the file:
+#   api_key: ${IMMICH_API_KEY}
 
 immich:
-  url: https://immich.local           # no trailing slash
-  api_key_file: ~/.config/immframe/api_key
+  url: https://immich.local                # no trailing slash
+  api_key: ""                              # required — set in your config.yaml
   timeout_s: 10
 
 selection:
-  default_mode: random                # random | album | smart
-  album_ids: []                       # used when default_mode = album
-  smart_query: ""                     # used when default_mode = smart
-  prefetch_count: 5                   # queue depth ahead of slideshow
+  default_mode: random                     # random | album | smart
+  album_ids: []                            # used when default_mode = album
+  smart_query: ""                          # used when default_mode = smart
+  prefetch_count: 5                        # queue depth ahead of slideshow
 
 video:
   enabled: true
-  stream: true                        # play directly from Immich URL; false = download first
+  stream: true                             # play directly from Immich URL
   mute: true
 
 viewer:
-  # Carried through to viewer/display.py — see picframe wiki for full
-  # documentation of these keys. Only the most common ones listed.
+  # Carried through to viewer/display.py — see picframe wiki for the full
+  # key reference. Only the most common ones listed.
   blur_edges: true
   fit_to_screen: true
-  time_delay: 60                      # seconds between slides
-  fade_time: 4                        # seconds for crossfade
+  time_delay: 60                           # seconds between slides
+  fade_time: 4                             # seconds for crossfade
   mat_images: true
-  show_text_tm: 20                    # seconds to keep overlay text up
+  show_text_tm: 20                         # seconds to keep overlay text up
   show_text_fm: "%b %-d, %Y"
 
 control:
-  # Phase-2 surface. Listed so the config shape is final.
+  # Phase-2 surface — wiring in progress. Disabled by default.
   mqtt:
     enabled: false
     host: homeassistant.local
     port: 1883
     user: ""
-    password_file: ""                 # never inline credentials in YAML
+    password: ""
     base_topic: immframe
   http:
     enabled: false
-    bind: 127.0.0.1                   # default loopback, not 0.0.0.0
+    bind: 127.0.0.1                        # default loopback, not 0.0.0.0
     port: 8080
     auth: true
-    auth_file: ~/.config/immframe/http_basic_auth
+    username: ""
+    password: ""
   peripherals:
     enabled: true
-    input_type: keyboard              # keyboard | mouse | touch | none
+    input_type: keyboard                   # keyboard | mouse | touch | none
