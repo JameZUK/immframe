@@ -30,9 +30,13 @@ viewer:
   fit_to_screen: true
   time_delay: 60                           # seconds between slides
   fade_time: 4                             # seconds for crossfade
+  brightness: 1.0                          # 0.0 - 1.0
   mat_images: true
+  show_clock: false
   show_text_tm: 20                         # seconds to keep overlay text up
   show_text_fm: "%b %-d, %Y"
+  show_text: "title caption name date location"   # space-separated keys:
+                                                   # title | caption | name | date | location | folder
 
 control:
   # Phase-2 surface — wiring in progress. Disabled by default.

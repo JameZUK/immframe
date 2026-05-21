@@ -43,7 +43,7 @@ DEVICE_MODEL = "Immich slideshow"
 
 @dataclass(frozen=True)
 class Entity:
-    component: str                           # 'switch', 'select', 'text', 'button', 'sensor'
+    component: str                           # 'switch', 'select', 'text', 'button', 'sensor', 'number'
     object_id: str
     name: str
     icon: str | None = None
@@ -53,9 +53,14 @@ class Entity:
     payload_on: str = "ON"
     payload_off: str = "OFF"
     payload_press: str = "PRESS"
+    min: float | None = None                 # for 'number'
+    max: float | None = None                 # for 'number'
+    step: float | None = None                # for 'number'
+    unit: str | None = None                  # for 'number' / 'sensor'
 
 
 ENTITIES: tuple[Entity, ...] = (
+    # Slideshow transport
     Entity("switch", "paused", "Paused", icon="mdi:pause"),
     Entity(
         "select", "selection_mode", "Selection mode",
@@ -63,10 +68,30 @@ ENTITIES: tuple[Entity, ...] = (
     ),
     Entity("text", "album_ids", "Album IDs", icon="mdi:image-album"),
     Entity("text", "smart_query", "Smart query", icon="mdi:magnify"),
+    Entity("button", "next", "Next", icon="mdi:skip-next", has_state=False),
+
+    # Display
+    Entity("switch", "display_is_on", "Display", icon="mdi:monitor"),
     Entity(
-        "button", "next", "Next", icon="mdi:skip-next",
-        has_state=False,
+        "number", "brightness", "Brightness", icon="mdi:brightness-7",
+        min=0.0, max=1.0, step=0.05,
     ),
+
+    # Slideshow timing
+    Entity(
+        "number", "time_delay", "Slide duration", icon="mdi:timer-outline",
+        min=1.0, max=3600.0, step=1.0, unit="s",
+    ),
+    Entity(
+        "number", "fade_time", "Crossfade duration", icon="mdi:transition",
+        min=0.0, max=30.0, step=0.5, unit="s",
+    ),
+
+    # Overlays
+    Entity("text", "show_text", "Overlay fields", icon="mdi:format-text"),
+    Entity("switch", "show_clock", "Clock", icon="mdi:clock-outline"),
+
+    # Read-only
     Entity(
         "sensor", "current_asset", "Current asset", icon="mdi:image",
         has_command=False,
@@ -85,6 +110,18 @@ def _state_of(controller: "Controller", entity: Entity) -> str:
         return ", ".join(controller.album_ids)
     if oid == "smart_query":
         return controller.smart_query
+    if oid == "display_is_on":
+        return "ON" if controller.display_is_on else "OFF"
+    if oid == "brightness":
+        return f"{controller.brightness:.2f}"
+    if oid == "time_delay":
+        return f"{controller.time_delay:g}"
+    if oid == "fade_time":
+        return f"{controller.fade_time:g}"
+    if oid == "show_text":
+        return ", ".join(controller.show_text)
+    if oid == "show_clock":
+        return "ON" if controller.show_clock else "OFF"
     if oid == "current_asset":
         a = controller.current_asset
         return a.id if a is not None else ""
@@ -113,16 +150,29 @@ def _attrs_of(controller: "Controller", entity: Entity) -> dict | None:
 def _apply_cmd(controller: "Controller", entity: Entity, payload: str) -> None:
     """Apply an incoming MQTT command to the controller."""
     oid = entity.object_id
+    s = payload.strip()
     if oid == "paused":
-        controller.paused = (payload.strip().upper() == entity.payload_on)
+        controller.paused = (s.upper() == entity.payload_on)
     elif oid == "selection_mode":
-        controller.selection_mode = payload.strip()
+        controller.selection_mode = s
     elif oid == "album_ids":
-        controller.album_ids = [s.strip() for s in payload.split(",") if s.strip()]
+        controller.album_ids = [t.strip() for t in s.split(",") if t.strip()]
     elif oid == "smart_query":
-        controller.smart_query = payload.strip()
+        controller.smart_query = s
     elif oid == "next":
         controller.next()
+    elif oid == "display_is_on":
+        controller.display_is_on = (s.upper() == entity.payload_on)
+    elif oid == "brightness":
+        controller.brightness = float(s)
+    elif oid == "time_delay":
+        controller.time_delay = float(s)
+    elif oid == "fade_time":
+        controller.fade_time = float(s)
+    elif oid == "show_text":
+        controller.show_text = [t.strip() for t in s.split(",") if t.strip()]
+    elif oid == "show_clock":
+        controller.show_clock = (s.upper() == entity.payload_on)
     else:
         log.debug("no command handler for %s", oid)
 
@@ -278,6 +328,15 @@ class MqttInterface:
                 payload["options"] = list(entity.options)
             elif entity.component == "button":
                 payload["payload_press"] = entity.payload_press
+            elif entity.component == "number":
+                if entity.min is not None:
+                    payload["min"] = entity.min
+                if entity.max is not None:
+                    payload["max"] = entity.max
+                if entity.step is not None:
+                    payload["step"] = entity.step
+                if entity.unit is not None:
+                    payload["unit_of_measurement"] = entity.unit
             elif entity.component == "sensor":
                 payload["json_attributes_topic"] = _topic(self._base, entity, "attributes")
 

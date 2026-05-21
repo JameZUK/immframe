@@ -28,6 +28,12 @@ class _StubController:
         self.selection_mode = "random"
         self.album_ids = ["a", "b"]
         self.smart_query = "sunsets"
+        self.brightness = 1.0
+        self.display_is_on = True
+        self.show_text = ["title", "date"]
+        self.show_clock = False
+        self.time_delay = 60.0
+        self.fade_time = 4.0
         self.current_asset: Asset | None = None
         self.next_calls = 0
 
@@ -216,15 +222,62 @@ def test_on_connect_publishes_discovery(mqtt_mod):
     discovery_calls = [c for c in client.publish.call_args_list if c.args[0].startswith(f"{DISCOVERY_PREFIX}/")]
     # One discovery message per entity
     assert len(discovery_calls) == len(ENTITIES)
-    # Spot-check the switch entity
-    switch_call = next(c for c in discovery_calls if "/switch/" in c.args[0])
-    payload = json.loads(switch_call.args[1])
+    # Spot-check the paused switch
+    paused_call = next(c for c in discovery_calls if c.args[0].endswith("/paused/config"))
+    payload = json.loads(paused_call.args[1])
     assert payload["name"] == "Paused"
     assert payload["command_topic"] == "immframe/paused/set"
     assert payload["state_topic"] == "immframe/paused/state"
     assert payload["payload_on"] == "ON"
     assert payload["payload_off"] == "OFF"
     assert payload["device"]["identifiers"] == ["immframe"]
+
+
+def test_on_connect_publishes_number_min_max(mqtt_mod):
+    ctrl = _StubController()
+    iface = MqttInterface(_cfg(), ctrl)
+    iface.start()
+    _fire_on_connect(iface, mqtt_mod)
+    client = mqtt_mod.Client.return_value
+    brightness_call = next(
+        c for c in client.publish.call_args_list
+        if c.args[0].endswith("/brightness/config")
+    )
+    payload = json.loads(brightness_call.args[1])
+    assert payload["min"] == 0.0
+    assert payload["max"] == 1.0
+    assert payload["step"] == 0.05
+    time_delay_call = next(
+        c for c in client.publish.call_args_list
+        if c.args[0].endswith("/time_delay/config")
+    )
+    td = json.loads(time_delay_call.args[1])
+    assert td["min"] == 1.0
+    assert td["unit_of_measurement"] == "s"
+
+
+def test_apply_cmd_brightness(mqtt_mod):
+    from immframe.interfaces.mqtt import _apply_cmd
+    ctrl = _StubController()
+    brightness_e = next(e for e in ENTITIES if e.object_id == "brightness")
+    _apply_cmd(ctrl, brightness_e, "0.5")
+    assert ctrl.brightness == 0.5
+
+
+def test_apply_cmd_show_text(mqtt_mod):
+    from immframe.interfaces.mqtt import _apply_cmd
+    ctrl = _StubController()
+    e = next(e for e in ENTITIES if e.object_id == "show_text")
+    _apply_cmd(ctrl, e, "title, date, location")
+    assert ctrl.show_text == ["title", "date", "location"]
+
+
+def test_apply_cmd_time_delay(mqtt_mod):
+    from immframe.interfaces.mqtt import _apply_cmd
+    ctrl = _StubController()
+    e = next(e for e in ENTITIES if e.object_id == "time_delay")
+    _apply_cmd(ctrl, e, "30")
+    assert ctrl.time_delay == 30.0
 
 
 def test_on_connect_publishes_select_options(mqtt_mod):

@@ -112,6 +112,25 @@ def _format_location(asset: Asset) -> str | None:
     return ", ".join(parts) if parts else None
 
 
+# Order matches the picframe viewer's bit assignment (1, 2, 4, 8, 16, 32).
+SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder")
+
+
+def _parse_show_text(value: object) -> list[str]:
+    """Accept either a list of keys or picframe's space-separated string."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [k for k in value.split() if k in SHOW_TEXT_KEYS]
+    if isinstance(value, (list, tuple)):
+        return [k for k in value if isinstance(k, str) and k in SHOW_TEXT_KEYS]
+    return []
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
 class Controller:
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -122,6 +141,19 @@ class Controller:
         self._selection_mode: SelectionMode = config.selection.default_mode
         self._album_ids: list[str] = list(config.selection.album_ids)
         self._smart_query: str = config.selection.smart_query
+
+        # Viewer-bound shadow state. Setters write here AND (when viewer is
+        # up) to the viewer. `_sync_to_viewer()` reapplies at start() so any
+        # mutations between __init__ and start() land on the live viewer.
+        viewer_raw = config.viewer.raw
+        self._brightness: float = _clamp(float(viewer_raw.get("brightness", 1.0)), 0.0, 1.0)
+        self._display_is_on: bool = True
+        self._show_text_keys: list[str] = _parse_show_text(
+            viewer_raw.get("show_text", "title caption name date location")
+        )
+        self._show_clock: bool = bool(viewer_raw.get("show_clock", False))
+        self._time_delay: float = max(1.0, float(viewer_raw.get("time_delay", 60.0)))
+        self._fade_time: float = max(0.0, float(viewer_raw.get("fade_time", 4.0)))
 
         self._client = ImmichClient(
             config.immich.url,
@@ -152,6 +184,7 @@ class Controller:
         merged_viewer = {**_VIEWER_DEFAULTS, **self._config.viewer.raw}
         self._viewer = ViewerDisplay(merged_viewer)
         self._viewer.slideshow_start()
+        self._sync_to_viewer()
 
         if self._config.video.enabled:
             try:
@@ -197,13 +230,13 @@ class Controller:
         if viewer is None:
             raise RuntimeError("Controller.start() must be called before loop()")
 
-        time_delay = float(self._config.viewer.raw.get("time_delay", 60.0))
-        fade_time = float(self._config.viewer.raw.get("fade_time", 4.0))
         next_tm = 0.0
         current_path: Path | None = None
 
         while not self._stop_evt.is_set():
             now = time.time()
+            time_delay = self._time_delay
+            fade_time = self._fade_time
 
             advance = (
                 self._force_next_evt.is_set()
@@ -361,12 +394,126 @@ class Controller:
             self._force_next_evt.set()
         self._publish_state()
 
+    # ── Viewer-bound knobs ──────────────────────────────────────────────
+    @property
+    def brightness(self) -> float:
+        return self._brightness
+
+    @brightness.setter
+    def brightness(self, value: float) -> None:
+        v = _clamp(float(value), 0.0, 1.0)
+        self._brightness = v
+        if self._viewer is not None:
+            try:
+                self._viewer.set_brightness(v)
+            except Exception as e:
+                log.debug("viewer.set_brightness: %s", e)
+        self._publish_state()
+
+    @property
+    def display_is_on(self) -> bool:
+        if self._viewer is not None:
+            try:
+                self._display_is_on = bool(self._viewer.display_is_on)
+            except Exception:
+                pass
+        return self._display_is_on
+
+    @display_is_on.setter
+    def display_is_on(self, value: bool) -> None:
+        self._display_is_on = bool(value)
+        if self._viewer is not None:
+            try:
+                self._viewer.display_is_on = self._display_is_on
+            except Exception as e:
+                log.debug("viewer.display_is_on: %s", e)
+        self._publish_state()
+
+    @property
+    def show_text(self) -> list[str]:
+        return list(self._show_text_keys)
+
+    @show_text.setter
+    def show_text(self, value: object) -> None:
+        keys = _parse_show_text(value)
+        self._show_text_keys = keys
+        if self._viewer is not None:
+            try:
+                self._viewer.set_show_text(None)
+                for k in keys:
+                    self._viewer.set_show_text(k, "ON")
+            except Exception as e:
+                log.debug("viewer.set_show_text: %s", e)
+        self._publish_state()
+
+    @property
+    def show_clock(self) -> bool:
+        return self._show_clock
+
+    @show_clock.setter
+    def show_clock(self, value: bool) -> None:
+        self._show_clock = bool(value)
+        if self._viewer is not None:
+            try:
+                self._viewer.clock_is_on = self._show_clock
+            except Exception as e:
+                log.debug("viewer.clock_is_on: %s", e)
+        self._publish_state()
+
+    @property
+    def time_delay(self) -> float:
+        return self._time_delay
+
+    @time_delay.setter
+    def time_delay(self, value: float) -> None:
+        self._time_delay = max(1.0, float(value))
+        self._publish_state()
+
+    @property
+    def fade_time(self) -> float:
+        return self._fade_time
+
+    @fade_time.setter
+    def fade_time(self, value: float) -> None:
+        self._fade_time = max(0.0, float(value))
+        self._publish_state()
+
     # ── State exposure ──────────────────────────────────────────────────
     @property
     def current_asset(self) -> Asset | None:
         return self._current_asset
 
     # ── Internals ───────────────────────────────────────────────────────
+    def _sync_to_viewer(self) -> None:
+        """Apply controller-held shadow state to the live viewer.
+
+        Called once after viewer construction so settings mutated between
+        __init__ and start() take effect.
+        """
+        v = self._viewer
+        if v is None:
+            return
+        try:
+            v.set_brightness(self._brightness)
+        except Exception as e:
+            log.debug("sync brightness: %s", e)
+        try:
+            v.set_show_text(None)
+            for k in self._show_text_keys:
+                v.set_show_text(k, "ON")
+        except Exception as e:
+            log.debug("sync show_text: %s", e)
+        try:
+            v.clock_is_on = self._show_clock
+        except Exception as e:
+            log.debug("sync show_clock: %s", e)
+        # display_is_on is read from the viewer rather than pushed — initial
+        # hardware state is the viewer's to know.
+        try:
+            self._display_is_on = bool(v.display_is_on)
+        except Exception:
+            pass
+
     def _build_selector(self, mode: SelectionMode) -> AssetSelector:
         if mode == "random":
             return RandomSelector(self._client, include_videos=self._config.video.enabled)

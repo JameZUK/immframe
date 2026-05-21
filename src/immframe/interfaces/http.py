@@ -56,6 +56,21 @@ _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
 _SELECTION_MODES = ("random", "album", "smart")
+_SHOW_TEXT_KEYS = ("title", "caption", "name", "date", "location", "folder")
+
+_POST_PATHS = frozenset({
+    "/api/paused",
+    "/api/selection_mode",
+    "/api/album_ids",
+    "/api/smart_query",
+    "/api/next",
+    "/api/brightness",
+    "/api/display_is_on",
+    "/api/show_text",
+    "/api/show_clock",
+    "/api/time_delay",
+    "/api/fade_time",
+})
 
 
 class HttpInterface:
@@ -206,8 +221,7 @@ class _Handler(BaseHTTPRequestHandler):
         if m:
             return self._image(m.group(1))
         # POST-only paths return 405 here to be precise (vs blanket 404)
-        if self.path in {"/api/paused", "/api/selection_mode", "/api/album_ids",
-                         "/api/smart_query", "/api/next"}:
+        if self.path in _POST_PATHS:
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "POST only")
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -239,6 +253,36 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/next":
             self._ctrl.next()
             return self._empty(HTTPStatus.ACCEPTED)
+        if path == "/api/brightness":
+            value = self._require_number(0.0, 1.0)
+            self._ctrl.brightness = value
+            return self._state()
+        if path == "/api/display_is_on":
+            value = self._require_value(bool)
+            self._ctrl.display_is_on = value
+            return self._state()
+        if path == "/api/show_text":
+            value = self._require_value(list)
+            for item in value:
+                if not isinstance(item, str) or item not in _SHOW_TEXT_KEYS:
+                    raise _HttpError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"show_text items must be from {list(_SHOW_TEXT_KEYS)}",
+                    )
+            self._ctrl.show_text = value
+            return self._state()
+        if path == "/api/show_clock":
+            value = self._require_value(bool)
+            self._ctrl.show_clock = value
+            return self._state()
+        if path == "/api/time_delay":
+            value = self._require_number(1.0, 3600.0)
+            self._ctrl.time_delay = value
+            return self._state()
+        if path == "/api/fade_time":
+            value = self._require_number(0.0, 30.0)
+            self._ctrl.fade_time = value
+            return self._state()
         # GET-only paths
         if path in {"/api/version", "/api/state", "/healthz"}:
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "GET only")
@@ -274,6 +318,12 @@ class _Handler(BaseHTTPRequestHandler):
             "selection_mode": c.selection_mode,
             "album_ids": c.album_ids,
             "smart_query": c.smart_query,
+            "brightness": c.brightness,
+            "display_is_on": c.display_is_on,
+            "show_text": c.show_text,
+            "show_clock": c.show_clock,
+            "time_delay": c.time_delay,
+            "fade_time": c.fade_time,
             "current_asset": asset_obj,
         })
 
@@ -315,6 +365,18 @@ class _Handler(BaseHTTPRequestHandler):
             raise _HttpError(HTTPStatus.BAD_REQUEST, f"value must be {typ.__name__}")
         if not isinstance(v, typ):
             raise _HttpError(HTTPStatus.BAD_REQUEST, f"value must be {typ.__name__}")
+        return v
+
+    def _require_number(self, lo: float, hi: float) -> float:
+        body = self._read_json()
+        if not isinstance(body, dict) or "value" not in body:
+            raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'value': number}")
+        v = body["value"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise _HttpError(HTTPStatus.BAD_REQUEST, "value must be number")
+        v = float(v)
+        if v < lo or v > hi:
+            raise _HttpError(HTTPStatus.BAD_REQUEST, f"value must be in [{lo}, {hi}]")
         return v
 
 

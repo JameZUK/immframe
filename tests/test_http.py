@@ -31,6 +31,12 @@ class _StubController:
         self.selection_mode = "random"
         self.album_ids: list[str] = ["00000000-0000-0000-0000-000000000001"]
         self.smart_query = ""
+        self.brightness = 1.0
+        self.display_is_on = True
+        self.show_text: list[str] = ["title", "date"]
+        self.show_clock = False
+        self.time_delay = 60.0
+        self.fade_time = 4.0
         self.current_asset: Asset | None = None
         self.next_calls = 0
 
@@ -225,6 +231,103 @@ def test_post_next_advances():
         r = requests.post(f"{base}/api/next", timeout=2.0, auth=_auth())
         assert r.status_code == 202
         assert ctrl.next_calls == 1
+
+
+# ── Viewer controls ────────────────────────────────────────────────────────
+
+
+def test_state_includes_viewer_controls():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/api/state", timeout=2.0, auth=_auth())
+        body = r.json()
+        for key in ("brightness", "display_is_on", "show_text", "show_clock",
+                    "time_delay", "fade_time"):
+            assert key in body, f"missing {key} in state"
+
+
+def test_post_brightness():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/brightness", json={"value": 0.42},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.brightness == 0.42
+
+
+def test_post_brightness_out_of_range():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/brightness", json={"value": 1.5},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+        assert ctrl.brightness == 1.0
+        r = requests.post(f"{base}/api/brightness", json={"value": -0.1},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_brightness_rejects_bool():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/brightness", json={"value": True},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_display_is_on():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/display_is_on", json={"value": False},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.display_is_on is False
+
+
+def test_post_show_text():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/show_text",
+                          json={"value": ["title", "location"]},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.show_text == ["title", "location"]
+
+
+def test_post_show_text_rejects_unknown_keys():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/show_text",
+                          json={"value": ["title", "everything"]},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_show_clock():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/show_clock", json={"value": True},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.show_clock is True
+
+
+def test_post_time_delay():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/time_delay", json={"value": 30},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.time_delay == 30.0
+
+
+def test_post_time_delay_out_of_range():
+    with _server() as (base, _, _):
+        r = requests.post(f"{base}/api/time_delay", json={"value": 0.5},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+        r = requests.post(f"{base}/api/time_delay", json={"value": 4000},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_fade_time():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/fade_time", json={"value": 1.5},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.fade_time == 1.5
 
 
 # ── Allow-listing / RCE prevention ─────────────────────────────────────────
