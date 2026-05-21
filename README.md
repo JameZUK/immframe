@@ -56,13 +56,14 @@ UX picframe got right.
 
 ## Status
 
-**Phase 1 + 2 complete.** Slideshow with three switchable selection modes,
-MQTT control with Home Assistant auto-discovery, and a small REST API for
-monitoring and command. The frame is controlled entirely via HA or HTTP —
-there's no on-device input (no keyboard, mouse, or touch).
+**Phase 1 + 2 complete.** Slideshow with four switchable selection modes,
+MQTT control with Home Assistant auto-discovery, REST API for monitoring
+and command, and a built-in web dashboard. The frame is controlled entirely
+via HA, HTTP, or the dashboard — there's no on-device input (no keyboard,
+mouse, or touch).
 
-93 unit tests across config, Immich client, selectors, prefetch worker,
-MQTT, and HTTP.
+151 unit tests across config, Immich client, selectors, prefetch worker,
+MQTT, HTTP, and the controller.
 
 ## Quick start
 

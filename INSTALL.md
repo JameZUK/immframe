@@ -64,9 +64,11 @@ immich:
   api_key: YOUR-IMMICH-API-KEY             # required
 
 selection:
-  default_mode: random                     # random | album | smart
+  default_mode: random                     # random | album | smart | scene
   # album_ids: ["abc-123"]                  # when default_mode = album
   # smart_query: "family at the beach"      # when default_mode = smart
+  # scene mode needs no config — it discovers labels via Immich's
+  # /search/explore endpoint and rotates through them automatically
 
 viewer:
   time_delay: 60                           # seconds per slide
@@ -118,7 +120,94 @@ Logs land on stdout. Flags:
 
 `Ctrl-C` to quit. `SIGTERM` also clean-exits.
 
-## 5. Run on boot (optional)
+## 5. Control the frame
+
+immframe exposes itself three ways. All are opt-in via the `control:`
+section of the config file. The frame has no on-device input (no keyboard,
+mouse, or touch), so you'll want at least one of these.
+
+### MQTT + Home Assistant
+
+```yaml
+control:
+  mqtt:
+    enabled: true
+    host: homeassistant.local
+    port: 1883
+    user: immframe
+    password: ${MQTT_PASSWORD}             # or inline
+    base_topic: immframe
+```
+
+HA picks up the device automatically via MQTT discovery — see
+[docs/home-assistant.md](./docs/home-assistant.md) for the entity list,
+the generic-camera setup to view the current image, and a ready-made
+Lovelace card.
+
+### HTTP REST API + built-in dashboard
+
+```yaml
+control:
+  http:
+    enabled: true
+    bind: 127.0.0.1                        # 0.0.0.0 to expose on LAN
+    port: 8080
+    auth: true
+    username: admin
+    password: ${IMMFRAME_HTTP_PW}
+```
+
+A phone-friendly web dashboard is served at `http://<pi-ip>:8080/` — pause,
+next, mode switch, brightness slider, overlay toggles, current image.
+
+Endpoints for scripting / curl:
+
+| Endpoint | Method | Body |
+|---|---|---|
+| `/healthz` | GET | (no auth) liveness probe |
+| `/api/state` | GET | full state snapshot |
+| `/api/paused` | POST | `{"value": bool}` |
+| `/api/selection_mode` | POST | `{"value": "random"\|"album"\|"smart"\|"scene"}` |
+| `/api/album_ids` | POST | `{"value": ["uuid", ...]}` |
+| `/api/smart_query` | POST | `{"value": "..."}` |
+| `/api/next` | POST | — |
+| `/api/brightness` | POST | `{"value": 0.0-1.0}` |
+| `/api/display_is_on` | POST | `{"value": bool}` |
+| `/api/show_text` | POST | `{"value": ["title", "date", ...]}` |
+| `/api/show_clock` | POST | `{"value": bool}` |
+| `/api/time_delay` | POST | `{"value": seconds}` |
+| `/api/fade_time` | POST | `{"value": seconds}` |
+| `/api/image/<asset_id>` | GET | proxy preview JPEG from Immich |
+
+```bash
+curl -u admin:hunter2 http://127.0.0.1:8080/api/state | jq
+curl -u admin:hunter2 -X POST http://127.0.0.1:8080/api/paused -d '{"value":true}'
+```
+
+### CLI
+
+The `immframe` entry point doubles as a small CLI client when given a
+subcommand. It reads the same config to find URL + credentials, so it
+"just works" once `control.http.enabled: true`.
+
+```bash
+immframe state               # pretty-print /api/state
+immframe pause / resume      # toggle pause
+immframe next                # advance one slide
+immframe mode scene          # random | album | smart | scene
+immframe brightness 0.5
+immframe display on|off
+immframe albums "uuid-1,uuid-2"
+immframe query "family at the beach"
+immframe delay 30            # seconds per slide
+immframe fade 1.5            # seconds for crossfade
+immframe show-text title,date,location
+immframe clock on|off
+immframe immich-ping         # verify Immich reachable
+immframe random 5            # list 5 random asset IDs from Immich
+```
+
+## 6. Run on boot (optional)
 
 User-level systemd is the simplest path — no root needed for the service
 itself:
@@ -171,6 +260,10 @@ systemctl --user restart immframe          # if running under systemd
 | `ImmichError: ... 401` | API key wrong or `immich.api_key` empty in config |
 | `ImmichError: ... ConnectionError` | URL wrong, or Immich unreachable from the Pi |
 | Black screen forever | No assets matched the current selection — try `--log-level DEBUG` |
+| Scene mode produces no slides | Immich hasn't finished CLIP classification yet — check Immich → Administration → Jobs |
+| Dashboard / API responds 401 | Auth credentials mismatch between config and request |
+| Dashboard unreachable | `control.http.bind` is `127.0.0.1` (default); set to `0.0.0.0` for LAN access |
+| HA doesn't discover the device | `control.mqtt.enabled: true`?  broker reachable?  same broker as HA's MQTT integration? |
 | `ImportError` for pi3d deps | Missing SDL2 system packages (step 1) |
 | Videos black / silent | libmpv missing, or codec issue — try `mpv <url>` directly |
 | Display wrong size | Set `viewer.display_w` / `viewer.display_h` in YAML |
