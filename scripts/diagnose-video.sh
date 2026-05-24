@@ -108,7 +108,7 @@ section "4. MPV headless decode"
 if ! require mpv; then
     info "skipping — install with: sudo apt install libmpv2 mpv"
 else
-    mpv --version 2>&1 | head -1 | xargs -I{} info "{}"
+    info "$(mpv --version 2>&1 | head -1)"
     LOG_MPV=/tmp/diag-mpv.log
     mpv --vo=null --ao=null --frames=30 --no-config --really-quiet \
         --log-file="$LOG_MPV" \
