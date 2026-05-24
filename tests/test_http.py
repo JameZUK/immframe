@@ -63,6 +63,7 @@ def _asset() -> Asset:
         tag_names=(),
         people=(),
         favorite=False,
+        live_photo_video_id=None,
     )
 
 

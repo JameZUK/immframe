@@ -26,6 +26,7 @@ def _a(aid: str, kind: AssetKind = AssetKind.IMAGE) -> Asset:
         tag_names=(),
         people=(),
         favorite=False,
+        live_photo_video_id=None,
     )
 
 

@@ -28,6 +28,10 @@ video:
   enabled: true
   stream: true                             # play directly from Immich URL
   mute: true
+  vo: gpu                                  # MPV video output: gpu | x11 | drm | sdl
+  pause_pi3d_during_playback: true         # release framebuffer to MPV (KMS setups)
+  live_photo_hold_s: 1.0                   # seconds to show still before motion clip
+  max_play_s: 60.0                         # hard cap per video play (sec)
 
 viewer:
   # Carried through to viewer/display.py — see picframe wiki for the full

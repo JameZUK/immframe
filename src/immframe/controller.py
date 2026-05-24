@@ -215,10 +215,18 @@ class Controller:
         if self._config.video.enabled:
             try:
                 from .video.player import VideoPlayer
-                self._video_player = VideoPlayer(mute=self._config.video.mute)
+                self._video_player = VideoPlayer(
+                    mute=self._config.video.mute,
+                    vo=self._config.video.vo,
+                )
             except Exception as e:
-                log.warning("video disabled (mpv not available): %s", e)
+                log.warning(
+                    "video disabled (mpv not available, vo=%r): %s",
+                    self._config.video.vo, e,
+                )
                 self._video_player = None
+        else:
+            log.info("video disabled by config")
 
         # Ping is informational only — don't block startup if Immich is slow.
         if not self._client.ping():
@@ -313,6 +321,11 @@ class Controller:
                     current_path.unlink(missing_ok=True)
                 current_path = new_path
 
+                # Apple Live Photos: image asset with a paired motion clip
+                # — play the motion clip after the still has been visible.
+                if asset.live_photo_video_id:
+                    self._play_live_photo(asset)
+
                 next_tm = time.time() + time_delay
                 if not loop_running:
                     break
@@ -328,16 +341,52 @@ class Controller:
 
     def _play_video(self, asset: Asset) -> None:
         if self._video_player is None:
+            log.debug("skipping video asset %s — no player available", asset.id)
             return
         url, headers = self._client.video_play_args(asset.id)
         self._current_asset = asset
         self._publish_state()
+        log.info("video play: asset=%s url=%s", asset.id, url)
+        self._play_video_url(url, headers)
+
+    def _play_video_url(self, url: str, headers: dict[str, str]) -> None:
+        """Play a video URL through MPV; block until EOF, SIGINT, or
+        config.video.max_play_s ceiling."""
+        if self._video_player is None:
+            return
         end_evt = threading.Event()
-        self._video_player.play(url, headers=headers, on_end=end_evt.set)
+        try:
+            self._video_player.play(url, headers=headers, on_end=end_evt.set)
+        except Exception as e:
+            log.warning("video play failed: %s", e)
+            return
+        deadline = time.time() + max(1.0, self._config.video.max_play_s)
         while not end_evt.wait(timeout=0.5):
             if self._stop_evt.is_set():
                 self._video_player.stop()
                 return
+            if time.time() > deadline:
+                log.warning("video exceeded max_play_s; stopping")
+                self._video_player.stop()
+                return
+
+    def _play_live_photo(self, asset: Asset) -> None:
+        """For an image asset with a livePhotoVideoId, play the motion
+        clip after the still has been visible briefly."""
+        if (
+            self._video_player is None
+            or not asset.live_photo_video_id
+            or not self._config.video.enabled
+        ):
+            return
+        hold = max(0.0, self._config.video.live_photo_hold_s)
+        if hold > 0:
+            self._stop_evt.wait(hold)
+            if self._stop_evt.is_set():
+                return
+        url, headers = self._client.video_play_args(asset.live_photo_video_id)
+        log.info("live photo: asset=%s motion=%s", asset.id, asset.live_photo_video_id)
+        self._play_video_url(url, headers)
 
     def stop(self) -> None:
         self._stop_evt.set()

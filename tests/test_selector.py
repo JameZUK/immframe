@@ -36,6 +36,7 @@ def _a(aid: str) -> Asset:
         tag_names=(),
         people=(),
         favorite=False,
+        live_photo_video_id=None,
     )
 
 

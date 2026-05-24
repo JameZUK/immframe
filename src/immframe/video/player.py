@@ -32,7 +32,7 @@ class VideoPlayer:
         *,
         mute: bool = True,
         fit: Literal["contain", "cover"] = "contain",
-        vo: VideoOutput = "gpu",
+        vo: VideoOutput | str = "gpu",
     ) -> None:
         # Imported lazily so the module imports cleanly on dev hosts without libmpv.
         import mpv
@@ -53,7 +53,17 @@ class VideoPlayer:
             osc=False,
             input_default_bindings=False,
             input_vo_keyboard=False,
+            log_handler=self._mpv_log,
         )
+
+        # Diagnostics: log what MPV reports so video issues are debuggable
+        # from the systemd journal alone.
+        try:
+            ver = self._mpv.mpv_version
+            current_vo = self._mpv.current_vo
+            log.info("MPV ready: version=%r vo=%r requested-vo=%r", ver, current_vo, vo)
+        except Exception as e:
+            log.debug("MPV version/vo introspection failed: %s", e)
 
         # End-of-file: clear the flag, notify caller.
         @self._mpv.event_callback("end_file")
@@ -78,6 +88,20 @@ class VideoPlayer:
                         cb()
                     except Exception as e:
                         log.exception("on_first_frame callback raised: %s", e)
+
+    # ── Diagnostics ─────────────────────────────────────────────────────
+    @staticmethod
+    def _mpv_log(level: str, prefix: str, message: str) -> None:
+        """MPV pipes its internal logs through this. We surface fatal/error
+        levels at WARNING and the rest at DEBUG so noisy MPV chatter
+        doesn't drown out our own logs by default."""
+        msg = f"mpv[{prefix}]: {message.rstrip()}"
+        if level in ("fatal", "error"):
+            log.warning(msg)
+        elif level == "warn":
+            log.info(msg)
+        else:
+            log.debug(msg)
 
     # ── Playback ────────────────────────────────────────────────────────
     def play(

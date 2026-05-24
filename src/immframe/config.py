@@ -98,6 +98,20 @@ class VideoConfig:
     enabled: bool = True
     stream: bool = True
     mute: bool = True
+    # MPV video output. Sensible defaults per environment:
+    #   "gpu"   — default; KMS/DRM on Pi, X11 GL elsewhere
+    #   "x11"   — pure X11 (force xwindow context)
+    #   "drm"   — direct framebuffer (KMS, no X server)
+    #   "sdl"   — SDL2 (works inside pi3d's window in some setups)
+    vo: str = "gpu"
+    # If `true`, MPV pauses playback during pi3d teardown — useful when
+    # MPV and pi3d fight for the framebuffer on KMS-only setups.
+    pause_pi3d_during_playback: bool = True
+    # How long to hold the still before triggering live-photo motion clip
+    live_photo_hold_s: float = 1.0
+    # Hard cap for any single video play (seconds) — slideshow advances
+    # even if MPV hasn't reported EOF (bad codec, network stall, ...)
+    max_play_s: float = 60.0
 
 
 @dataclass
@@ -223,6 +237,10 @@ class Config:
             enabled=bool(vid_raw.get("enabled", True)),
             stream=bool(vid_raw.get("stream", True)),
             mute=bool(vid_raw.get("mute", True)),
+            vo=vid_raw.get("vo", "gpu"),
+            pause_pi3d_during_playback=bool(vid_raw.get("pause_pi3d_during_playback", True)),
+            live_photo_hold_s=float(vid_raw.get("live_photo_hold_s", 1.0)),
+            max_play_s=float(vid_raw.get("max_play_s", 60.0)),
         )
 
         viewer = ViewerConfig(raw=dict(data.get("viewer", {})))

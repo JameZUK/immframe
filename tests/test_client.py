@@ -80,6 +80,25 @@ def test_ping_http_error_returns_false():
 
 
 @responses.activate
+def test_live_photo_video_id_extracted():
+    j = _asset_json("img-with-motion")
+    j["livePhotoVideoId"] = "vid-uuid-1234"
+    responses.add(responses.POST, f"{BASE}/api/search/random", json=[j])
+    c = ImmichClient(BASE, "k")
+    [a] = c.random_assets(1)
+    assert a.live_photo_video_id == "vid-uuid-1234"
+
+
+@responses.activate
+def test_live_photo_video_id_none_when_absent():
+    # _asset_json doesn't set livePhotoVideoId
+    responses.add(responses.POST, f"{BASE}/api/search/random", json=[_asset_json("plain")])
+    c = ImmichClient(BASE, "k")
+    [a] = c.random_assets(1)
+    assert a.live_photo_video_id is None
+
+
+@responses.activate
 def test_random_assets_normalises():
     responses.add(responses.POST, f"{BASE}/api/search/random", json=[_asset_json("a"), _asset_json("b", "VIDEO")])
     c = ImmichClient(BASE, "k")

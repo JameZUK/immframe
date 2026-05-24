@@ -60,6 +60,7 @@ def _asset(aid: str = "xyz") -> Asset:
         tag_names=(),
         people=(),
         favorite=False,
+        live_photo_video_id=None,
     )
 
 

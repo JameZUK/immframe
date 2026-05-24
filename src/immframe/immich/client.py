@@ -444,6 +444,7 @@ def _to_asset(d: dict[str, Any]) -> Asset:
         tag_names=tuple(t.get("value") or t.get("name") or "" for t in tags),
         people=people,
         favorite=bool(d.get("isFavorite", False)),
+        live_photo_video_id=d.get("livePhotoVideoId") or None,
     )
 
 

@@ -54,6 +54,10 @@ class Asset:
     tag_names: tuple[str, ...]
     people: tuple[str, ...]              # named (non-hidden) people from Immich
     favorite: bool
+    # Apple Live Photo / Motion Photo: when this is set on an IMAGE asset,
+    # it points to a separate VIDEO asset with the motion clip. The
+    # controller shows the still then plays the clip via MPV.
+    live_photo_video_id: str | None
 
     @property
     def is_portrait(self) -> bool:
