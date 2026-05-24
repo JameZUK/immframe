@@ -46,19 +46,56 @@ immich:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `default_mode` | enum | `random` | One of `random`, `album`, `smart`, `scene`, `people`. |
+| `default_mode` | enum | `random` | One of `random`, `album`, `smart`, `scene`, `people`, `memory`, `recent`, `playlist`. |
 | `album_ids` | list[string] | `[]` | Album UUIDs to draw from when `default_mode = album`. Multiple albums are merged + shuffled. |
 | `smart_query` | string | `""` | CLIP query when `default_mode = smart`. e.g. `"family at the beach"`. |
 | `people_ids` | list[string] | `[]` | Person UUIDs to filter on when `default_mode = people`. Empty list = rotate through ALL named people in the library. Use `immframe list-people` to discover UUIDs. |
+| `recent_days` | int | `30` | Window size for `default_mode = recent`. Photos uploaded (or taken — see `recent_field`) in the last N days. |
+| `recent_field` | enum | `created` | `created` = "uploaded to Immich" (most users want this for "new photos"); `taken` = "captured by camera" (use for "trip from last month"). |
+| `playlist` | list[dict] | `[]` | Used when `default_mode = playlist`. See [Playlist mode](#playlist-mode) below. |
 | `prefetch_count` | int | `5` | How many slides to pre-download ahead of the renderer. Higher = smoother on slow networks, more temp-disk and RAM. |
 
-### The five modes
+### The selection modes
 
 - **random** — `POST /api/search/random` across the whole library. Always something fresh.
 - **album** — Random within one or more albums. Curated.
 - **smart** — Immich's CLIP smart-search. Free-text. Requires the smart-search ML jobs to have run on your library.
 - **scene** — Picks a random label that Immich has auto-discovered (*beach*, *Amsterdam*, *wedding*, …) and slideshows ~25 photos from it before rotating. **Multi-source with auto-fallback** in this priority order: `things` (CLIP scenes) → cities → curated CLIP queries. The curated fallback works whenever Immich's smart search is enabled, even when `/search/explore` doesn't surface anything useful.
 - **people** — Slideshow of photos featuring specific people. With `people_ids` empty, rotates through every named person in the library (one person's photos at a time). With UUIDs set, restricts to those. Find UUIDs via `immframe list-people`.
+- **memory** — On-this-day. Uses Immich's `/memories` endpoint (the same "5 years ago" feature on the Immich home screen). Picks a random memory and shows its photos, then rotates. Zero config.
+- **recent** — Photos uploaded (or taken) recently. Configurable via `recent_days` and `recent_field`. Re-queries each rotation so newly-uploaded photos surface within minutes.
+- **playlist** — Round-robins through a sequence of other modes with configurable batch sizes. See below.
+
+### Playlist mode
+
+Cycle through several modes per session:
+
+```yaml
+selection:
+  default_mode: playlist
+  playlist:
+    - mode: random
+      count: 25
+    - mode: scene
+      count: 25
+    - mode: memory                  # On this day
+      count: 5
+    - mode: recent                  # Recently uploaded
+      count: 10
+      days: 7                       # override controller-level recent_days
+    - mode: people
+      count: 10
+      people_ids:                   # override controller-level people_ids
+        - "uuid-of-alice"
+        - "uuid-of-bob"
+```
+
+Per entry:
+- `mode` — required. Any selection mode except `playlist` (no nesting).
+- `count` — how many slides to show before rotating to the next entry (default `25`).
+- Mode-specific overrides — `album_ids`, `smart_query`, `people_ids`, `days`, `field`. If omitted, falls back to the controller-level config value.
+
+The playlist rotates indefinitely. If a sub-selector returns nothing (e.g. `recent` finds no new uploads), playlist auto-advances to the next entry without stalling.
 
 You can switch modes at runtime via MQTT, HTTP, the dashboard, or `immframe mode <mode>` — config just sets the starting mode.
 
@@ -67,6 +104,10 @@ selection:
   default_mode: scene
   album_ids: []
   smart_query: ""
+  people_ids: []
+  recent_days: 30
+  recent_field: created
+  playlist: []
   prefetch_count: 5
 ```
 
@@ -158,14 +199,15 @@ field appears on its own line in the overlay when its data is present.
 
 | Key | Renders when | Content |
 |---|---|---|
-| `title` | Always (currently always empty) | Reserved — Immich has no separate "title" concept. Will surface from a future Immich title field. |
 | `caption` | Asset has `exifInfo.description` | Caption / description from the photo's EXIF metadata. |
-| `name` | Always | Original filename of the cached preview (`<asset_id>.jpg`). Useful for debugging — usually you don't want this on in production. |
+| `name` | Always | Original filename of the asset (e.g. `IMG_0042.jpg`) — read from Immich's `originalFileName`. |
 | `date` | Asset has a `localDateTime` or `fileCreatedAt` | Photo taken date, formatted via `show_text_fm`. |
-| `location` | Any of city / state / country present | "City, State, Country" — pulled straight from Immich's reverse-geocoded EXIF. |
-| `folder` | Always | Parent directory name of the cached file. Of limited use under immframe (cache files all live in one temp dir) — kept for picframe-config compatibility. |
+| `location` | Any of city / state / country present in EXIF | "City, State, Country" — pulled from Immich's reverse-geocoded EXIF data. |
 | `people` | Immich has named, non-hidden people tagged in the asset | Comma-separated names from face recognition. Skips unnamed face clusters and people marked hidden in Immich. |
-| `tags` | Asset has user-defined tags assigned in Immich | Comma-separated tag values. Note: Immich does **not** auto-generate "what's in the image" tags via CLIP — these are tags you (or Immich's importer) set explicitly. For literal "things detected", the closest is the OCR endpoint, which isn't yet surfaced in the overlay (see [docs/api-opportunities.md](./api-opportunities.md)). |
+| `tags` | Asset has user-defined tags assigned in Immich | Comma-separated tag values. Immich does **not** auto-generate CLIP-detected tags — these are tags you (or Immich's importer) assigned explicitly. |
+| `ocr` | Image contains visible text that Immich's OCR job extracted | Comma-separated text strings. Use for "what's in the image" on screenshots / signs / documents. Costs one extra HTTP round-trip per slide while enabled. |
+| `title` | (legacy, kept for picframe-config compat) | Reserved — Immich has no separate title field. Never renders. Don't enable. |
+| `folder` | (legacy, kept for picframe-config compat) | Shows the cache tempdir under immframe (meaningless). Don't enable. |
 
 You can also toggle these at runtime — via HA's `text.immframe_show_text`,
 `POST /api/show_text` (JSON list), the dashboard checkboxes, or

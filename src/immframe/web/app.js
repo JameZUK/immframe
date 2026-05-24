@@ -60,8 +60,8 @@ function render(state) {
     $("smart-query").value = state.smart_query || "";
     $("people-ids").value = (state.people_ids || []).join(", ");
 
-    // For scene and people modes, surface the current label
-    const showLabel = state.selection_mode === "scene" || state.selection_mode === "people";
+    // All modes that carry a rotating label
+    const showLabel = ["scene", "people", "memory", "recent", "playlist"].includes(state.selection_mode);
     $("scene-row").hidden = !showLabel;
     if (showLabel) {
       $("current-scene").textContent = state.current_scene || "(loading)";

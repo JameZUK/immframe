@@ -312,7 +312,10 @@ def test_on_connect_publishes_select_options(mqtt_mod):
         if c.args[0].startswith(f"{DISCOVERY_PREFIX}/select/")
     )
     payload = json.loads(select_call.args[1])
-    assert payload["options"] == ["random", "album", "smart", "scene", "people"]
+    assert payload["options"] == [
+        "random", "album", "smart", "scene", "people",
+        "memory", "recent", "playlist",
+    ]
 
 
 def test_on_connect_publishes_state(mqtt_mod):

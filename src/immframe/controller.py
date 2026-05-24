@@ -24,11 +24,15 @@ from .config import Config, SelectionMode
 from .immich.client import ImmichClient
 from .immich.models import Asset, AssetKind
 from .immich.prefetch import PrefetchWorker
+from .immich.client import ImmichError
 from .immich.selector import (
     AlbumSelector,
     AssetSelector,
+    MemorySelector,
     PeopleSelector,
+    PlaylistSelector,
     RandomSelector,
+    RecentSelector,
     SceneSelector,
     SmartSelector,
 )
@@ -100,15 +104,22 @@ class Pic:
     location. `orientation` is always 1 (Immich pre-rotates).
     """
 
-    def __init__(self, fname: str, asset: Asset) -> None:
+    def __init__(self, fname: str, asset: Asset, *, ocr_text: list[str] | None = None) -> None:
         self.fname = fname
+        # `display_name` is read by the viewer's `name` branch in preference
+        # to `basename(fname)` — gives the user's original filename instead
+        # of our internal `<uuid>.jpg` cache filename.
+        self.display_name = asset.original_file_name or None
         self.orientation = 1
-        self.title = asset.title
-        self.caption = asset.caption
+        # Normalise empty strings to None so the viewer's `is not None`
+        # checks correctly skip the overlay row.
+        self.title = asset.title if asset.title else None
+        self.caption = asset.caption if asset.caption else None
         self.exif_datetime = asset.taken_at.timestamp() if asset.taken_at is not None else 0.0
         self.location = _format_location(asset)
         self.people = ", ".join(asset.people) if asset.people else None
         self.tags = ", ".join(asset.tag_names) if asset.tag_names else None
+        self.ocr = ", ".join(ocr_text) if ocr_text else None
 
 
 def _format_location(asset: Asset) -> str | None:
@@ -117,10 +128,16 @@ def _format_location(asset: Asset) -> str | None:
 
 
 # Canonical list of overlay-field keys. interfaces/http.py imports this for
-# its POST /api/show_text validator. The viewer (viewer/display.py) has its
-# own bit map keyed by the same names — keep both lists in sync when adding
-# a field. Order matches the viewer's bit assignment (1, 2, 4, 8, 16, 32, 64).
-SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder", "people", "tags")
+# the POST /api/show_text validator.
+#
+# Note: `title` and `folder` are accepted by parsers (for picframe-config
+# compatibility) but render nothing useful under immframe — Immich has no
+# title field, and the "folder" is just our internal cache tempdir. The
+# SPA's checkbox list omits them. The viewer's _SHOW_TEXT_BITS map still
+# carries them.
+SHOW_TEXT_KEYS: tuple[str, ...] = (
+    "title", "caption", "name", "date", "location", "folder", "people", "tags", "ocr",
+)
 
 
 def _parse_show_text(value: object) -> list[str]:
@@ -276,7 +293,15 @@ class Controller:
 
                 self._current_asset = asset
                 self._publish_state()
-                pic = Pic(str(new_path), asset)
+
+                ocr_text: list[str] | None = None
+                if "ocr" in self._show_text_keys and asset.kind == AssetKind.IMAGE:
+                    try:
+                        ocr_text = self._client.get_ocr(asset.id)
+                    except ImmichError as e:
+                        log.debug("get_ocr(%s) failed: %s", asset.id, e)
+
+                pic = Pic(str(new_path), asset, ocr_text=ocr_text)
                 pics_arg = [pic, None]                  # picframe slideshow_is_running shape
                 loop_running, _, _ = viewer.slideshow_is_running(
                     pics_arg, time_delay=time_delay, fade_time=fade_time, paused=self._paused
@@ -369,8 +394,9 @@ class Controller:
 
     @selection_mode.setter
     def selection_mode(self, mode: SelectionMode) -> None:
-        if mode not in ("random", "album", "smart", "scene", "people"):
-            raise ValueError(f"unknown selection_mode: {mode!r}")
+        valid = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
+        if mode not in valid:
+            raise ValueError(f"unknown selection_mode: {mode!r}; valid: {valid}")
         self._selection_mode = mode
         self._selector = self._build_selector(mode)
         self._prefetch.set_selector(self._selector)
@@ -507,11 +533,11 @@ class Controller:
 
     @property
     def current_scene(self) -> str | None:
-        """When `selection_mode` is "scene" or "people", the label / person
-        name currently driving selection; None otherwise."""
-        if isinstance(self._selector, (SceneSelector, PeopleSelector)):
-            return self._selector.current_scene
-        return None
+        """The label currently driving selection (scene name, person name,
+        "On this day", "Last 30 days", etc.) — or None for modes that don't
+        carry a label."""
+        sel = self._selector
+        return getattr(sel, "current_scene", None)
 
     # ── Internals ───────────────────────────────────────────────────────
     def _sync_to_viewer(self) -> None:
@@ -555,4 +581,55 @@ class Controller:
             return SceneSelector(self._client)
         if mode == "people":
             return PeopleSelector(self._client, self._people_ids)
+        if mode == "memory":
+            return MemorySelector(self._client)
+        if mode == "recent":
+            return RecentSelector(
+                self._client,
+                days=self._config.selection.recent_days,
+                field=self._config.selection.recent_field,
+            )
+        if mode == "playlist":
+            entries = []
+            for entry in self._config.selection.playlist:
+                try:
+                    sel = self._build_selector_from_entry(entry)
+                except ValueError as e:
+                    log.warning("skipping playlist entry %s: %s", entry, e)
+                    continue
+                count = int(entry.get("count", 25))
+                entries.append((sel, count))
+            if not entries:
+                log.warning(
+                    "playlist mode selected but selection.playlist is empty or invalid — "
+                    "falling back to random"
+                )
+                return RandomSelector(self._client, include_videos=self._config.video.enabled)
+            return PlaylistSelector(entries)
         raise ValueError(f"unknown selection_mode: {mode!r}")
+
+    def _build_selector_from_entry(self, entry: dict) -> AssetSelector:
+        """Build a sub-selector for a playlist entry. Each entry may override
+        controller-level config (album_ids, people_ids, days, etc.)."""
+        mode = entry.get("mode")
+        if mode == "random":
+            return RandomSelector(self._client, include_videos=self._config.video.enabled)
+        if mode == "album":
+            return AlbumSelector(self._client, list(entry.get("album_ids", self._album_ids)))
+        if mode == "smart":
+            return SmartSelector(self._client, entry.get("smart_query", self._smart_query))
+        if mode == "scene":
+            return SceneSelector(self._client)
+        if mode == "people":
+            return PeopleSelector(self._client, list(entry.get("people_ids", self._people_ids)))
+        if mode == "memory":
+            return MemorySelector(self._client)
+        if mode == "recent":
+            return RecentSelector(
+                self._client,
+                days=int(entry.get("days", self._config.selection.recent_days)),
+                field=entry.get("field", self._config.selection.recent_field),
+            )
+        if mode == "playlist":
+            raise ValueError("nested playlist mode is not supported")
+        raise ValueError(f"unknown playlist mode: {mode!r}")

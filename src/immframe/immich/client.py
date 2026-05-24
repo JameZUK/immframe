@@ -153,13 +153,19 @@ class ImmichClient:
         *,
         taken_after: datetime | None = None,
         taken_before: datetime | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         city: str | None = None,
         country: str | None = None,
         tag_ids: Iterable[str] | None = None,
         person_ids: Iterable[str] | None = None,
         count: int = 20,
     ) -> list[Asset]:
-        """POST /search/metadata with structured filters."""
+        """POST /search/metadata with structured filters.
+
+        `taken_*` filters by the photo's EXIF capture time.
+        `created_*` filters by upload time to Immich.
+        """
         body: dict[str, Any] = {
             "size": count,
             "withExif": True,
@@ -169,6 +175,10 @@ class ImmichClient:
             body["takenAfter"] = taken_after.isoformat()
         if taken_before is not None:
             body["takenBefore"] = taken_before.isoformat()
+        if created_after is not None:
+            body["createdAfter"] = created_after.isoformat()
+        if created_before is not None:
+            body["createdBefore"] = created_before.isoformat()
         if city is not None:
             body["city"] = city
         if country is not None:
@@ -179,6 +189,40 @@ class ImmichClient:
             body["personIds"] = list(person_ids)
         data = self._post("/search/metadata", json=body)
         return _items_from_search(data)
+
+    def list_memories(self) -> list[dict[str, Any]]:
+        """GET /memories — returns the list of on-this-day memories.
+
+        Each entry has `{id, type, memoryAt, data: {year}, assets: [...]}`.
+        Assets in memories DO NOT carry exifInfo by default — the overlay
+        will show date / file / people but not city / camera. To get full
+        exif, you'd need to re-fetch each asset via `asset()`.
+        """
+        data = self._get("/memories")
+        if not isinstance(data, list):
+            raise ImmichError("/memories: expected list")
+        return [m for m in data if isinstance(m, dict)]
+
+    def get_ocr(self, asset_id: str) -> list[str]:
+        """GET /assets/{id}/ocr — returns the visible text strings found in
+        the image by Immich's OCR job, in document order.
+
+        Empty list when OCR hasn't run, the asset has no text, or all
+        detected boxes were marked not-visible.
+        """
+        data = self._get(f"/assets/{asset_id}/ocr")
+        if not isinstance(data, list):
+            return []
+        texts = []
+        for box in data:
+            if not isinstance(box, dict):
+                continue
+            if box.get("isVisible") is False:
+                continue
+            text = box.get("text")
+            if isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+        return texts
 
     def list_people(
         self, *, include_hidden: bool = False, size: int = 500,

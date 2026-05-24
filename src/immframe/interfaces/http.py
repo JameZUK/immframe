@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
-_SELECTION_MODES = ("random", "album", "smart", "scene", "people")
+_SELECTION_MODES = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
 # Re-export the canonical list from the controller so additions land in one place.
 _SHOW_TEXT_KEYS = SHOW_TEXT_KEYS
 

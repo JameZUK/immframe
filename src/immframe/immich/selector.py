@@ -22,7 +22,9 @@ import random
 import threading
 from typing import Literal, Protocol, runtime_checkable
 
-from .client import ImmichClient, ImmichError
+from datetime import datetime, timedelta, timezone
+
+from .client import ImmichClient, ImmichError, _to_asset
 from .models import Asset
 
 log = logging.getLogger(__name__)
@@ -232,6 +234,172 @@ class PeopleSelector:
             return []
         self._person_index = {p["id"]: p["name"] for p in named}
         return [p["id"] for p in named]
+
+
+class MemorySelector:
+    """On-this-day slideshow driven by Immich's /memories endpoint.
+
+    Each rotation picks a random memory (typically "on this day N years
+    ago"), shuffles its assets, and shows them in order. The memory list
+    itself refreshes when exhausted (each memory has a handful of assets,
+    so we cycle through many memories quickly).
+
+    `current_scene` exposes a friendly label like "On this day — 5 years
+    ago" so the controller can publish it.
+
+    Note: assets returned by /memories don't carry exifInfo by default —
+    overlay city/country/camera will be blank for memory-mode slides
+    unless we re-fetch each asset. Kept simple for v1.
+    """
+
+    def __init__(self, client: ImmichClient, *, pool_size: int = 25) -> None:
+        self._client = client
+        self._pool_size = pool_size
+        self._lock = threading.Lock()
+        self._memories: list[dict] = []
+        self._pool: list[Asset] = []
+        self._current_label: str | None = None
+
+    @property
+    def current_scene(self) -> str | None:
+        with self._lock:
+            return self._current_label
+
+    def next_batch(self, n: int) -> list[Asset]:
+        with self._lock:
+            if not self._pool:
+                self._rotate()
+            if not self._pool:
+                return []
+            take = min(n, len(self._pool))
+            out = self._pool[:take]
+            self._pool = self._pool[take:]
+            return out
+
+    def _rotate(self) -> None:
+        if not self._memories:
+            try:
+                self._memories = self._client.list_memories()
+            except ImmichError as e:
+                log.warning("list_memories failed: %s", e)
+                return
+        if not self._memories:
+            log.info("no memories returned — Immich's memory generation may not have run yet")
+            return
+
+        mem = random.choice(self._memories)
+        asset_dicts = mem.get("assets") or []
+        pool = [_to_asset(a) for a in asset_dicts if isinstance(a, dict)]
+        random.shuffle(pool)
+        self._pool = pool
+
+        # Friendly label
+        data = mem.get("data") or {}
+        year = data.get("year") if isinstance(data, dict) else None
+        if isinstance(year, int):
+            age = datetime.now().year - year
+            self._current_label = f"On this day — {age} year{'s' if age != 1 else ''} ago"
+        else:
+            mem_at = (mem.get("memoryAt") or "")[:10]
+            self._current_label = f"Memory: {mem_at}" if mem_at else "Memory"
+        log.info("memory rotation -> %r (%d assets)", self._current_label, len(pool))
+
+
+class RecentSelector:
+    """Random within recently-uploaded photos.
+
+    Looks at assets uploaded (`createdAfter`) to Immich within the last
+    `days` window. Re-queries on every rotation so newly-uploaded photos
+    surface quickly.
+
+    For "taken in the last N days" instead of "uploaded in the last N
+    days", set `field="taken"`.
+    """
+
+    def __init__(
+        self,
+        client: ImmichClient,
+        *,
+        days: int = 30,
+        field: str = "created",     # 'created' (uploaded) or 'taken'
+        pool_size: int = 25,
+    ) -> None:
+        if field not in ("created", "taken"):
+            raise ValueError(f"RecentSelector.field must be 'created' or 'taken'; got {field!r}")
+        self._client = client
+        self._days = max(1, int(days))
+        self._field = field
+        self._pool_size = pool_size
+
+    @property
+    def current_scene(self) -> str | None:
+        return f"Last {self._days} days"
+
+    def next_batch(self, n: int) -> list[Asset]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self._days)
+        try:
+            if self._field == "taken":
+                assets = self._client.search_metadata(taken_after=cutoff, count=n)
+            else:
+                assets = self._client.search_metadata(created_after=cutoff, count=n)
+        except ImmichError as e:
+            log.warning("recent search failed: %s", e)
+            return []
+        random.shuffle(assets)
+        return assets
+
+
+class PlaylistSelector:
+    """Round-robins through a sequence of (selector, count) entries.
+
+    On each `next_batch(n)` call, draws up to `n` assets from the current
+    entry's selector, counting toward its `count` quota. When the quota
+    fills or the sub-selector returns nothing, advances to the next entry.
+    Cycles indefinitely.
+
+    Useful for "show 25 random, then 25 on-this-day, then 25 of Alice,
+    repeat" without picking just one mode.
+    """
+
+    def __init__(self, entries: list[tuple[AssetSelector, int]]) -> None:
+        if not entries:
+            raise ValueError("PlaylistSelector requires at least one entry")
+        self._entries = list(entries)
+        self._lock = threading.Lock()
+        self._idx = 0
+        self._consumed_this_round = 0
+
+    @property
+    def current_scene(self) -> str | None:
+        with self._lock:
+            sel, _ = self._entries[self._idx]
+        # Expose the inner selector's label if it has one
+        return getattr(sel, "current_scene", None)
+
+    def next_batch(self, n: int) -> list[Asset]:
+        with self._lock:
+            # Try every entry once before giving up — covers the case where
+            # the first few are empty (recent with no new uploads, etc.)
+            for _ in range(len(self._entries)):
+                sel, cnt = self._entries[self._idx]
+                remaining = max(0, cnt - self._consumed_this_round)
+                take = min(n, remaining)
+                if take == 0:
+                    self._advance()
+                    continue
+                batch = sel.next_batch(take)
+                if not batch:
+                    self._advance()
+                    continue
+                self._consumed_this_round += len(batch)
+                if self._consumed_this_round >= cnt:
+                    self._advance()
+                return batch
+        return []
+
+    def _advance(self) -> None:
+        self._idx = (self._idx + 1) % len(self._entries)
+        self._consumed_this_round = 0
 
 
 CURATED_SCENE_QUERIES: tuple[str, ...] = (

@@ -64,7 +64,8 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("switch", "paused", "Paused", icon="mdi:pause"),
     Entity(
         "select", "selection_mode", "Selection mode",
-        options=("random", "album", "smart", "scene", "people"), icon="mdi:image-multiple",
+        options=("random", "album", "smart", "scene", "people", "memory", "recent", "playlist"),
+        icon="mdi:image-multiple",
     ),
     Entity("text", "album_ids", "Album IDs", icon="mdi:image-album"),
     Entity("text", "smart_query", "Smart query", icon="mdi:magnify"),

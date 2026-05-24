@@ -58,6 +58,7 @@ _SHOW_TEXT_BITS: dict[str, int] = {
     "folder": 32,
     "people": 64,
     "tags": 128,
+    "ocr": 256,
 }
 
 
@@ -444,7 +445,13 @@ class ViewerDisplay:
             if (self.__show_text & 2) == 2 and pic.caption is not None:  # caption
                 info_strings.append(pic.caption)
             if (self.__show_text & 4) == 4:  # name
-                info_strings.append(os.path.basename(pic.fname))
+                # Prefer the original filename when the caller (controller)
+                # provides one — fall back to basename(fname) for picframe
+                # compatibility. Avoids surfacing our internal <uuid>.jpg
+                # cache filename to the user.
+                info_strings.append(
+                    getattr(pic, "display_name", None) or os.path.basename(pic.fname)
+                )
             if (self.__show_text & 8) == 8 and pic.exif_datetime > 0:  # date
                 fdt = time.strftime(self.__show_text_fm, time.localtime(pic.exif_datetime))
                 info_strings.append(fdt)
@@ -465,6 +472,8 @@ class ViewerDisplay:
                 info_strings.append(pic.people)
             if (self.__show_text & 128) == 128 and getattr(pic, "tags", None):  # tags
                 info_strings.append(pic.tags)
+            if (self.__show_text & 256) == 256 and getattr(pic, "ocr", None):  # ocr
+                info_strings.append(pic.ocr)
             if paused:
                 info_strings.append("PAUSED")
         final_string = " • ".join(info_strings)

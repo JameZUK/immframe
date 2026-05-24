@@ -29,7 +29,7 @@ from typing import Any, Literal
 import yaml
 
 
-SelectionMode = Literal["random", "album", "smart", "scene", "people"]
+SelectionMode = Literal["random", "album", "smart", "scene", "people", "memory", "recent", "playlist"]
 
 _DEFAULT_YAML_PATH = Path(__file__).parent / "_defaults" / "default.yaml"
 _SEARCH_PATHS = (
@@ -85,6 +85,11 @@ class SelectionConfig:
     album_ids: list[str] = field(default_factory=list)
     smart_query: str = ""
     people_ids: list[str] = field(default_factory=list)  # empty = rotate all named people
+    recent_days: int = 30                                # "recent" mode window in days
+    recent_field: str = "created"                        # 'created' (uploaded) or 'taken'
+    # playlist mode: list of entry dicts, each with at least `mode` and `count`.
+    # See docs/configuration.md for the schema.
+    playlist: list[dict[str, Any]] = field(default_factory=list)
     prefetch_count: int = 5
 
 
@@ -198,10 +203,20 @@ class Config:
             album_ids=list(sel_raw.get("album_ids", [])),
             smart_query=sel_raw.get("smart_query", ""),
             people_ids=list(sel_raw.get("people_ids", [])),
+            recent_days=int(sel_raw.get("recent_days", 30)),
+            recent_field=sel_raw.get("recent_field", "created"),
+            playlist=list(sel_raw.get("playlist", [])),
             prefetch_count=int(sel_raw.get("prefetch_count", 5)),
         )
-        if selection.default_mode not in ("random", "album", "smart", "scene", "people"):
-            raise ValueError(f"selection.default_mode invalid: {selection.default_mode!r}")
+        valid_modes = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
+        if selection.default_mode not in valid_modes:
+            raise ValueError(
+                f"selection.default_mode invalid: {selection.default_mode!r}; valid: {valid_modes}"
+            )
+        if selection.recent_field not in ("created", "taken"):
+            raise ValueError(
+                f"selection.recent_field must be 'created' or 'taken'; got {selection.recent_field!r}"
+            )
 
         vid_raw = data.get("video", {})
         video = VideoConfig(

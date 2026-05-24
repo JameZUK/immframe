@@ -15,9 +15,13 @@ immich:
                                             # — 'fullsize' is the right pick for 4K displays
 
 selection:
-  default_mode: random                     # random | album | smart
-  album_ids: []                            # used when default_mode = album
-  smart_query: ""                          # used when default_mode = smart
+  default_mode: random                     # random | album | smart | scene | people | memory | recent | playlist
+  album_ids: []                            # used when default_mode = album (or playlist entries)
+  smart_query: ""                          # used when default_mode = smart (or playlist entries)
+  people_ids: []                           # used when default_mode = people; empty = rotate all named
+  recent_days: 30                          # window for default_mode = recent
+  recent_field: created                    # 'created' (uploaded) or 'taken' (capture date)
+  playlist: []                             # used when default_mode = playlist; see docs/configuration.md
   prefetch_count: 5                        # queue depth ahead of slideshow
 
 video:

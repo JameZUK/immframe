@@ -234,6 +234,66 @@ def test_invalid_image_size_rejected():
 
 
 @responses.activate
+def test_list_memories_returns_list_only():
+    responses.add(
+        responses.GET,
+        f"{BASE}/api/memories",
+        json=[
+            {"id": "m1", "type": "on_this_day", "memoryAt": "2025-05-26T00:00:00Z",
+             "data": {"year": 2020}, "assets": [_asset_json("a")]},
+            "garbage",
+            {"id": "m2", "type": "on_this_day", "assets": []},
+        ],
+    )
+    c = ImmichClient(BASE, "k")
+    out = c.list_memories()
+    assert [m["id"] for m in out] == ["m1", "m2"]
+
+
+@responses.activate
+def test_get_ocr_filters_invisible_and_empty():
+    responses.add(
+        responses.GET,
+        f"{BASE}/api/assets/aid/ocr",
+        json=[
+            {"text": "Hello", "isVisible": True},
+            {"text": "World ", "isVisible": True},
+            {"text": "  ", "isVisible": True},               # blank, skipped
+            {"text": "ignored", "isVisible": False},          # not visible, skipped
+            {"text": None, "isVisible": True},                # not str, skipped
+        ],
+    )
+    c = ImmichClient(BASE, "k")
+    assert c.get_ocr("aid") == ["Hello", "World"]
+
+
+@responses.activate
+def test_get_ocr_empty_when_endpoint_returns_unexpected_shape():
+    responses.add(responses.GET, f"{BASE}/api/assets/aid/ocr", json={"oops": True})
+    c = ImmichClient(BASE, "k")
+    assert c.get_ocr("aid") == []
+
+
+@responses.activate
+def test_search_metadata_created_after():
+    captured = {}
+    def cb(request):
+        import json
+        captured["body"] = json.loads(request.body)
+        return (200, {"Content-Type": "application/json"},
+                '{"assets":{"items":[],"count":0,"facets":[],"nextPage":null,"total":0},"albums":{"items":[],"count":0,"facets":[],"total":0}}')
+    responses.add_callback(responses.POST, f"{BASE}/api/search/metadata", callback=cb)
+    c = ImmichClient(BASE, "k")
+    from datetime import datetime, timezone
+    c.search_metadata(
+        created_after=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        count=10,
+    )
+    assert "createdAfter" in captured["body"]
+    assert captured["body"]["size"] == 10
+
+
+@responses.activate
 def test_random_assets_non_list_raises():
     responses.add(responses.POST, f"{BASE}/api/search/random", json={"oops": "wrong shape"})
     c = ImmichClient(BASE, "k")

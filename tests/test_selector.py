@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from immframe.immich.client import ImmichError
 from immframe.immich.models import Asset, AssetKind, GeoInfo
 from immframe.immich.selector import (
     AlbumSelector,
     CURATED_SCENE_QUERIES,
+    MemorySelector,
     PeopleSelector,
+    PlaylistSelector,
     RandomSelector,
+    RecentSelector,
     SceneSelector,
     SmartSelector,
 )
@@ -300,6 +305,148 @@ def test_people_metadata_error_returns_empty():
     client.search_metadata.side_effect = ImmichError("upstream")
     sel = PeopleSelector(client)
     assert sel.next_batch(5) == []
+
+
+# ── MemorySelector ──────────────────────────────────────────────────────
+
+
+def _memory(year: int, asset_ids: list[str]) -> dict:
+    return {
+        "id": f"mem-{year}",
+        "type": "on_this_day",
+        "memoryAt": f"{year}-05-26T00:00:00Z",
+        "data": {"year": year},
+        "assets": [{
+            "id": aid, "type": "IMAGE", "originalFileName": f"{aid}.jpg",
+            "originalMimeType": "image/jpeg", "width": 100, "height": 100,
+            "localDateTime": "2020-05-26T12:00:00Z", "fileCreatedAt": "2020-05-26T12:00:00Z",
+            "isFavorite": False, "exifInfo": {}, "people": [], "tags": [],
+            "checksum": "x", "createdAt": "x", "duration": "0:00:00",
+            "fileModifiedAt": "x", "hasMetadata": True, "isArchived": False,
+            "isEdited": False, "isOffline": False, "isTrashed": False,
+            "originalPath": "/", "ownerId": "u", "thumbhash": "h",
+            "updatedAt": "x", "visibility": "timeline",
+        } for aid in asset_ids],
+    }
+
+
+def test_memory_picks_random_memory_and_shows_its_assets():
+    client = MagicMock()
+    client.list_memories.return_value = [
+        _memory(2020, ["a1", "a2"]),
+        _memory(2021, ["b1", "b2"]),
+    ]
+    sel = MemorySelector(client)
+    batch = sel.next_batch(4)
+    # All assets from one memory (whichever was picked)
+    ids = {a.id for a in batch}
+    assert ids in ({"a1", "a2"}, {"b1", "b2"})
+    assert sel.current_scene and "year" in sel.current_scene.lower()
+
+
+def test_memory_empty_list_silent():
+    client = MagicMock()
+    client.list_memories.return_value = []
+    sel = MemorySelector(client)
+    assert sel.next_batch(5) == []
+
+
+def test_memory_error_returns_empty():
+    from immframe.immich.client import ImmichError
+    client = MagicMock()
+    client.list_memories.side_effect = ImmichError("down")
+    sel = MemorySelector(client)
+    assert sel.next_batch(5) == []
+
+
+# ── RecentSelector ──────────────────────────────────────────────────────
+
+
+def test_recent_uses_created_after_by_default():
+    client = MagicMock()
+    client.search_metadata.return_value = [_a("r1"), _a("r2")]
+    sel = RecentSelector(client, days=14)
+    batch = sel.next_batch(5)
+    assert {a.id for a in batch} == {"r1", "r2"}
+    # Verify it asked for createdAfter, not takenAfter
+    kwargs = client.search_metadata.call_args.kwargs
+    assert "created_after" in kwargs
+    assert "taken_after" not in kwargs
+
+
+def test_recent_with_taken_field():
+    client = MagicMock()
+    client.search_metadata.return_value = [_a("r")]
+    sel = RecentSelector(client, days=7, field="taken")
+    sel.next_batch(5)
+    kwargs = client.search_metadata.call_args.kwargs
+    assert "taken_after" in kwargs
+    assert "created_after" not in kwargs
+
+
+def test_recent_rejects_bad_field():
+    client = MagicMock()
+    with pytest.raises(ValueError, match="field"):
+        RecentSelector(client, field="yesterday")
+
+
+def test_recent_exposes_friendly_label():
+    sel = RecentSelector(MagicMock(), days=14)
+    assert "14" in (sel.current_scene or "")
+
+
+# ── PlaylistSelector ────────────────────────────────────────────────────
+
+
+def test_playlist_rotates_through_entries():
+    s1 = MagicMock()
+    s1.next_batch.side_effect = [[_a("s1-1"), _a("s1-2")], [_a("s1-3"), _a("s1-4")]]
+    s2 = MagicMock()
+    s2.next_batch.return_value = [_a("s2-1"), _a("s2-2")]
+
+    sel = PlaylistSelector([(s1, 4), (s2, 2)])
+
+    # First two calls drain s1's 4-item quota
+    out1 = sel.next_batch(2)
+    out2 = sel.next_batch(2)
+    assert {a.id for a in out1} == {"s1-1", "s1-2"}
+    assert {a.id for a in out2} == {"s1-3", "s1-4"}
+
+    # s1 exhausted, advance to s2
+    out3 = sel.next_batch(2)
+    assert {a.id for a in out3} == {"s2-1", "s2-2"}
+
+
+def test_playlist_advances_when_sub_returns_empty():
+    s1 = MagicMock()
+    s1.next_batch.return_value = []   # always empty
+    s2 = MagicMock()
+    s2.next_batch.return_value = [_a("s2-1")]
+    sel = PlaylistSelector([(s1, 10), (s2, 10)])
+    out = sel.next_batch(5)
+    assert out[0].id == "s2-1"
+
+
+def test_playlist_returns_empty_when_all_subs_empty():
+    s1 = MagicMock()
+    s1.next_batch.return_value = []
+    s2 = MagicMock()
+    s2.next_batch.return_value = []
+    sel = PlaylistSelector([(s1, 5), (s2, 5)])
+    assert sel.next_batch(5) == []
+
+
+def test_playlist_empty_entries_raises():
+    with pytest.raises(ValueError):
+        PlaylistSelector([])
+
+
+def test_playlist_current_scene_proxies_active_sub():
+    s1 = MagicMock()
+    s1.current_scene = "beach"
+    s1.next_batch.return_value = [_a("x")]
+    sel = PlaylistSelector([(s1, 10)])
+    assert sel.current_scene == "beach"
 
 
 def test_scene_force_mode_skips_discovery():
