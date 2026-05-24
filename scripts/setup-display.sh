@@ -17,6 +17,12 @@
 #       checkout reachable)
 #   2.  Installs labwc + seatd via apt (idempotent)
 #   3.  Adds the target user to the video / input / seat groups
+#
+# IMPORTANT: do NOT run this script with sudo. It must run as your
+# normal user — it sudos itself for the specific commands that need
+# root (apt, usermod, /etc edits). If you run it with sudo, files
+# written to your home directory will end up owned by root and
+# unreadable when you log in normally.
 #   4.  Enables and starts seatd (the DRM/input broker)
 #   5.  Configures autologin on tty1 via a systemd drop-in
 #   6.  Adds the labwc-launch block to ~/.bash_profile (marker-fenced so
@@ -209,6 +215,11 @@ section "Preflight checks"
 # Don't run as root — we want the invoking user's $HOME for configs.
 if [ "$(id -u)" = "0" ] && [ -z "${SUDO_USER:-}" ]; then
     abort "do not run this script as root directly. Run as your normal user; the script will sudo when needed."
+fi
+# If invoked via sudo, refuse — it breaks ownership of files written to
+# $TARGET_HOME. The script sudo's specific commands itself.
+if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" = "0" ]; then
+    abort "do not invoke this script with sudo. Run it as your normal user; the script will sudo only the specific commands that need it (apt, usermod, /etc edits)."
 fi
 ok "running as $USER (target=$TARGET_USER)"
 
