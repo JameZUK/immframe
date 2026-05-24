@@ -31,7 +31,10 @@
 #       existing ones)
 #   8.  Disables the existing immframe systemd user service (autostart
 #       takes over inside labwc)
-#   9.  Prints a verification summary + suggests reboot
+#   9.  If autostart was just updated AND immframe is already running,
+#       restarts it in place using the same Wayland env so the new
+#       autostart settings take effect without a reboot
+#   10. Prints a verification summary + suggests reboot
 
 set -uo pipefail
 
@@ -267,6 +270,7 @@ cat <<EOF
   5. Add labwc-launch block to ${TARGET_HOME}/.bash_profile
   6. Copy labwc autostart + rc.xml to ${TARGET_HOME}/.config/labwc/
   7. Disable the immframe systemd user service (autostart will replace it)
+  8. Restart immframe in place if the autostart file was updated
 EOF
 
 if [ "$YES" != "1" ] && [ "$DRY_RUN" != "1" ]; then
@@ -392,6 +396,7 @@ if [ ! -d "$LABWC_DIR" ]; then
     fi
 fi
 
+AUTOSTART_CHANGED=0
 for name in autostart rc.xml; do
     SRC=$EXAMPLES/$name
     DST=$LABWC_DIR/$name
@@ -420,6 +425,7 @@ for name in autostart rc.xml; do
         [ "$name" = "autostart" ] && chmod +x "$DST"
         done_ "installed $DST"
     fi
+    [ "$name" = "autostart" ] && AUTOSTART_CHANGED=1
 done
 
 # ── 7. Disable existing user systemd unit for immframe ─────────────────────
@@ -445,6 +451,50 @@ else
         run "$SCTL disable immframe" && done_ "disabled immframe user service (labwc autostart will launch it)"
     else
         skip "immframe user service not enabled"
+    fi
+fi
+
+# ── 8. Restart running immframe if autostart changed ──────────────────────
+section "8. Restart immframe if autostart changed"
+RUNNING_PID=$(pgrep -f "${IMMFRAME_DIR}/.venv/bin/immframe" 2>/dev/null | head -1)
+if [ -z "$RUNNING_PID" ]; then
+    info "immframe not currently running — will start on next labwc session"
+elif [ "$AUTOSTART_CHANGED" != "1" ]; then
+    skip "immframe running, autostart unchanged"
+else
+    info "autostart was updated and immframe is running (PID $RUNNING_PID) — restarting in place"
+    if [ "$DRY_RUN" = "1" ]; then
+        dry "kill $RUNNING_PID and relaunch via systemd-cat with the same Wayland env"
+    else
+        # Reuse the running process's WAYLAND_DISPLAY / XDG_RUNTIME_DIR so the
+        # new immframe attaches to the same labwc session. Reading /proc/<pid>/environ
+        # requires being the same user as the process (which we are — script
+        # refuses to run as root).
+        ENV_LINES=$(tr '\0' '\n' < "/proc/$RUNNING_PID/environ" 2>/dev/null \
+                    | grep -E '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY|XDG_SESSION_TYPE)=')
+        if [ -z "$ENV_LINES" ]; then
+            warn "couldn't read display env from /proc/$RUNNING_PID/environ"
+            warn "log out of labwc and back in (or reboot) to pick up autostart changes"
+        else
+            kill "$RUNNING_PID" 2>/dev/null || true
+            # Wait for it to actually exit so SDL2/pi3d releases resources
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                kill -0 "$RUNNING_PID" 2>/dev/null || break
+                sleep 0.5
+            done
+            kill -0 "$RUNNING_PID" 2>/dev/null && kill -9 "$RUNNING_PID" 2>/dev/null
+            # Spawn a detached subshell that exports the captured env, then
+            # runs immframe piped to systemd-cat. Backgrounded + disowned so it
+            # survives this script exiting.
+            (
+                set -a
+                eval "$ENV_LINES"
+                set +a
+                exec "${IMMFRAME_DIR}/.venv/bin/immframe" 2>&1 | systemd-cat -t immframe
+            ) >/dev/null 2>&1 &
+            disown
+            done_ "restarted immframe via systemd-cat (logs: journalctl -t immframe -f)"
+        fi
     fi
 fi
 
