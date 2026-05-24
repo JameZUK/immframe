@@ -31,10 +31,12 @@ the gallery.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import logging
 import re
 import secrets
+import socket
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -101,13 +103,22 @@ class HttpInterface:
     def start(self) -> None:
         if self._server is not None:
             return
-        addr = (self._cfg.bind, self._cfg.port)
-        server = _Server(addr, _Handler, self._ctrl, self._client, self._cfg)
+        bind, port = self._cfg.bind, self._cfg.port
+        family = _address_family(bind)
+        # Upgrade the IPv4 wildcard to dual-stack — `0.0.0.0` on its own
+        # only listens for v4 clients, which breaks on IPv6-only networks.
+        if family == socket.AF_INET6 and bind == "0.0.0.0":
+            bind = "::"
+        server = _Server((bind, port), _Handler, self._ctrl, self._client,
+                         self._cfg, address_family=family)
         thread = threading.Thread(target=server.serve_forever, name="http", daemon=True)
         thread.start()
         self._server = server
         self._thread = thread
-        log.info("http listening on %s:%d", *addr)
+        proto = "IPv6" + ("/IPv4 dual-stack" if family == socket.AF_INET6 and bind == "::" else "")
+        if family == socket.AF_INET:
+            proto = "IPv4"
+        log.info("http listening on %s:%d (%s)", bind, port, proto)
 
     def stop(self) -> None:
         s = self._server
@@ -124,6 +135,26 @@ class HttpInterface:
             self._thread = None
 
 
+def _address_family(bind: str) -> int:
+    """Choose IPv4 vs IPv6 family from the bind string.
+
+    - `0.0.0.0` and any plain IPv4 string -> AF_INET (we upgrade `0.0.0.0`
+      to dual-stack `::` separately at start() time, so this returns
+      AF_INET6 for that case).
+    - `::`, `::1`, any string with a `:` -> AF_INET6.
+    - Hostnames default to AF_INET6 (dual-stack listening preferred).
+    """
+    if bind == "0.0.0.0":
+        return socket.AF_INET6                     # upgraded to dual-stack
+    if ":" in bind:
+        return socket.AF_INET6
+    try:
+        ipaddress.IPv4Address(bind)
+        return socket.AF_INET
+    except ValueError:
+        return socket.AF_INET6                     # hostnames -> prefer v6
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -134,8 +165,18 @@ class _Server(ThreadingHTTPServer):
         controller: "Controller",
         client: ImmichClient,
         cfg: HttpConfig,
+        *,
+        address_family: int = socket.AF_INET,
     ) -> None:
+        self.address_family = address_family
         super().__init__(addr, handler)
+        # For IPv6 sockets, accept both IPv4 and IPv6 clients (Linux
+        # defaults V6ONLY=1; turning it off enables dual-stack).
+        if address_family == socket.AF_INET6:
+            try:
+                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            except (OSError, AttributeError) as e:
+                log.debug("V6ONLY=0 failed (single-stack v6 only): %s", e)
         self.controller = controller
         self.immich = client
         self.auth_required = bool(cfg.auth)

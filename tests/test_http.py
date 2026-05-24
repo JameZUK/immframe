@@ -514,6 +514,48 @@ def test_wrong_username_unauthorized():
         assert r.status_code == 401
 
 
+# ── Bind address family detection ───────────────────────────────────────
+
+
+def test_address_family_detection():
+    """Quick unit test for the bind-string -> address-family mapping.
+    Important: `0.0.0.0` returns AF_INET6 because we upgrade it to
+    dual-stack `::` separately at server start."""
+    import socket
+    from immframe.interfaces.http import _address_family
+    assert _address_family("127.0.0.1") == socket.AF_INET
+    assert _address_family("192.168.1.10") == socket.AF_INET
+    assert _address_family("0.0.0.0") == socket.AF_INET6        # dual-stack upgrade
+    assert _address_family("::1") == socket.AF_INET6
+    assert _address_family("::") == socket.AF_INET6
+    assert _address_family("fe80::1") == socket.AF_INET6
+    assert _address_family("photoframe.local") == socket.AF_INET6  # hostname -> v6
+    assert _address_family("[::1]") == socket.AF_INET6
+
+
+def test_dual_stack_socket_accepts_v4_and_v6():
+    """Verify the bind upgrade: 0.0.0.0 should produce a dual-stack listener
+    that an IPv4 client can still connect to."""
+    import socket
+    port = _free_port()
+    cfg = HttpConfig(
+        enabled=True, bind="0.0.0.0", port=port,
+        auth=False, username="", password="",
+    )
+    ctrl = _StubController()
+    client = MagicMock()
+    iface = HttpInterface(cfg, ctrl, client)
+    iface.start()
+    try:
+        # IPv4 client should still connect (dual-stack)
+        r = requests.get(f"http://127.0.0.1:{port}/healthz", timeout=2.0)
+        assert r.status_code == 200
+        # And the underlying socket family is v6
+        assert iface._server.socket.family == socket.AF_INET6
+    finally:
+        iface.stop()
+
+
 # ── SPA / static assets ────────────────────────────────────────────────────
 
 
