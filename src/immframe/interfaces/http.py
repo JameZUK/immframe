@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import __version__
 from ..config import HttpConfig
+from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
 
 if TYPE_CHECKING:
@@ -57,7 +58,8 @@ _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
 _SELECTION_MODES = ("random", "album", "smart", "scene")
-_SHOW_TEXT_KEYS = ("title", "caption", "name", "date", "location", "folder", "people")
+# Re-export the canonical list from the controller so additions land in one place.
+_SHOW_TEXT_KEYS = SHOW_TEXT_KEYS
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 

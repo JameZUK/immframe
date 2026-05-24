@@ -114,7 +114,10 @@ def _format_location(asset: Asset) -> str | None:
     return ", ".join(parts) if parts else None
 
 
-# Order matches the picframe viewer's bit assignment (1, 2, 4, 8, 16, 32).
+# Canonical list of overlay-field keys. interfaces/http.py imports this for
+# its POST /api/show_text validator. The viewer (viewer/display.py) has its
+# own bit map keyed by the same names — keep both lists in sync when adding
+# a field. Order matches the viewer's bit assignment (1, 2, 4, 8, 16, 32, 64).
 SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder", "people")
 
 

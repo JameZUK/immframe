@@ -96,6 +96,9 @@ immich:
 See **[INSTALL.md](./INSTALL.md)** for the full setup including system
 packages, Raspberry Pi notes, systemd unit and troubleshooting.
 
+Every config knob — every YAML key, every `show_text` field, every viewer
+option — is documented in **[docs/configuration.md](./docs/configuration.md)**.
+
 ## Acknowledgements
 
 - **[picframe](https://github.com/helgeerbe/picframe)** — Helge Erbe, Paddy

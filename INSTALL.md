@@ -98,10 +98,11 @@ fields like `api_key`, so you'll know immediately).
 ### Default keys
 
 Everything else inherits from packaged defaults — see
-[`src/immframe/_defaults/default.yaml`](./src/immframe/_defaults/default.yaml)
-for the immframe-level keys, and the
-[picframe wiki](https://github.com/helgeerbe/picframe/wiki/Configuration)
-for the full viewer key reference (blur, mat, clock, font, etc.).
+[`src/immframe/_defaults/default.yaml`](./src/immframe/_defaults/default.yaml).
+
+The full reference — every section, every key, every `show_text` field, every
+viewer option, with types / defaults / what they actually do — is
+[**docs/configuration.md**](./docs/configuration.md).
 
 ## 4. Run
 

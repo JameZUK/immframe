@@ -46,20 +46,30 @@ get_image_meta = type("get_image_meta", (), {"GetImageMeta": _ImageLoader})
 dpms_mode = ("unsupported", "pi", "x_dpms")
 
 
-# utility functions with no dependency on ViewerDisplay properties
+# Module-level so txt_to_bit() and parse_show_text() share one source of truth.
+# Adding a new key here is one of two viewer-side edits to support a new
+# overlay field; the other is the matching branch in `__make_text`.
+_SHOW_TEXT_BITS: dict[str, int] = {
+    "title": 1,
+    "caption": 2,
+    "name": 4,
+    "date": 8,
+    "location": 16,
+    "folder": 32,
+    "people": 64,
+}
+
+
 def txt_to_bit(txt):
-    txt_map = {"title": 1, "caption": 2, "name": 4, "date": 8, "location": 16, "folder": 32, "people": 64}
-    if txt in txt_map:
-        return txt_map[txt]
-    return 0
+    return _SHOW_TEXT_BITS.get(txt, 0)
 
 
 def parse_show_text(txt):
     show_text = 0
     txt = txt.lower()
-    for txt_key in ("title", "caption", "name", "date", "location", "folder", "people"):
+    for txt_key, bit in _SHOW_TEXT_BITS.items():
         if txt_key in txt:
-            show_text |= txt_to_bit(txt_key)
+            show_text |= bit
     return show_text
 
 
