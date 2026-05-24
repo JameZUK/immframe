@@ -155,6 +155,32 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
+def _check_display_environment(*, video_enabled: bool) -> None:
+    """Warn loudly if the user is on bare TTY/KMS with video enabled.
+
+    pi3d and MPV both want to drive the KMS framebuffer, and without a
+    compositor (X11 / Wayland) mediating, MPV cannot get DRM master while
+    pi3d holds it. Slideshow works but video playback silently fails.
+    See docs/display-setup.md.
+    """
+    import os
+    if not video_enabled:
+        return
+    if os.environ.get("WAYLAND_DISPLAY"):
+        log.info("display: Wayland (%s)", os.environ["WAYLAND_DISPLAY"])
+        return
+    if os.environ.get("DISPLAY"):
+        log.info("display: X11 (%s)", os.environ["DISPLAY"])
+        return
+    log.warning(
+        "no Wayland or X11 detected (WAYLAND_DISPLAY/DISPLAY unset). "
+        "pi3d will fight MPV for the framebuffer on bare TTY/KMS — video "
+        "playback will fail with 'Cannot set CRTC'. To fix, install labwc "
+        "(or another Wayland compositor) and run immframe inside its "
+        "session. See docs/display-setup.md."
+    )
+
+
 class Controller:
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -206,6 +232,8 @@ class Controller:
         # Lazy imports so a CI/dev host without pi3d / libmpv can still run
         # the test suite for client/selector/prefetch.
         from .viewer.display import ViewerDisplay
+
+        _check_display_environment(video_enabled=self._config.video.enabled)
 
         merged_viewer = {**_VIEWER_DEFAULTS, **self._config.viewer.raw}
         self._viewer = ViewerDisplay(merged_viewer)

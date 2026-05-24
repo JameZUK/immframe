@@ -99,6 +99,12 @@ packages, Raspberry Pi notes, systemd unit and troubleshooting.
 Every config knob — every YAML key, every `show_text` field, every viewer
 option — is documented in **[docs/configuration.md](./docs/configuration.md)**.
 
+If you want **video playback** (incl. live photos) on a Raspberry Pi,
+you also need a Wayland compositor — see
+**[docs/display-setup.md](./docs/display-setup.md)** for the labwc
+setup. Without one, the slideshow works but video silently fails
+because pi3d and MPV fight for the framebuffer.
+
 ## Acknowledgements
 
 - **[picframe](https://github.com/helgeerbe/picframe)** — Helge Erbe, Paddy

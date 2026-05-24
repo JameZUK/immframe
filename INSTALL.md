@@ -31,6 +31,12 @@ sudo apt install -y \
   for video playback. Missing libmpv is non-fatal: immframe still runs,
   video assets are skipped with a log warning.
 
+> **Video playback** also needs a Wayland compositor (or X11). Pi running
+> in bare TTY mode → slideshow works but videos won't display because pi3d
+> grabs the framebuffer and MPV can't take it back. See
+> [docs/display-setup.md](./docs/display-setup.md) for the labwc setup
+> (it's the official RPi OS Bookworm/Trixie default).
+
 > On older Debian / Raspberry Pi OS releases the libmpv package may be
 > named `libmpv1`. Use whichever is in your apt sources.
 

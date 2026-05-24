@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!--
+  ~/.config/labwc/rc.xml
+  Copy to ~/.config/labwc/rc.xml.
+
+  Makes every window fullscreen + undecorated — appropriate for a
+  kiosk that only ever runs the slideshow + occasional MPV video.
+-->
+<labwc_config>
+  <core>
+    <gap>0</gap>
+  </core>
+  <theme>
+    <cornerRadius>0</cornerRadius>
+    <titlebar show="no"/>
+  </theme>
+  <windowRules>
+    <windowRule identifier="*" matchOnce="false">
+      <action name="ToggleFullscreen"/>
+    </windowRule>
+  </windowRules>
+</labwc_config>
