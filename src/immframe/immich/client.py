@@ -300,8 +300,11 @@ class ImmichClient:
         - `preview` (~1440x2560)
         - `fullsize` (original-resolution JPEG; transcoded for HEIC/RAW).
           The /thumbnail endpoint 302-redirects fullsize to
-          /assets/{id}/original — `requests` follows redirects by default
-          and re-sends the API key header.
+          /assets/{id}/original — `requests` follows redirects by default.
+
+        Self-healing: if `fullsize` returns 401/403 (some Immich servers
+        block /original via API-key auth), logs once and permanently
+        switches the session to `preview`. No silent retries thereafter.
         """
         url = self._url(f"/assets/{asset_id}/thumbnail")
         try:
@@ -309,8 +312,14 @@ class ImmichClient:
                 url, params={"size": self._image_size}, stream=True,
                 timeout=self._timeout, allow_redirects=True,
             ) as r:
+                if r.status_code in (401, 403) and self._image_size == "fullsize":
+                    self._fallback_to_preview(asset_id, r.status_code, r.url)
+                    return self.download_preview(asset_id, dest)   # retry once at new size
                 if r.status_code >= 400:
-                    raise ImmichError(f"thumbnail {asset_id}: {r.status_code}")
+                    raise ImmichError(
+                        f"thumbnail {asset_id}: {r.status_code} "
+                        f"(final URL: {r.url})"
+                    )
                 tmp = dest.with_name(dest.name + ".part")
                 with tmp.open("wb") as f:
                     for chunk in r.iter_content(chunk_size=64 * 1024):
@@ -320,6 +329,22 @@ class ImmichClient:
         except requests.RequestException as e:
             raise ImmichError(f"thumbnail {asset_id}: {e}") from e
 
+    def _fallback_to_preview(self, asset_id: str, status: int, final_url: str) -> None:
+        log.warning(
+            "fullsize blocked by server (HTTP %d on %s). Most likely cause: "
+            "your Immich API key is missing the 'asset.download' permission "
+            "(newer Immich versions are granular). Either: "
+            "(1) re-create the API key with download permissions enabled "
+            "[Immich -> Account Settings -> API Keys -> edit -> tick "
+            "asset.download], or "
+            "(2) set `immich.image_size: preview` in your config to use the "
+            "smaller (~1440x2560) preview which doesn't need download "
+            "permission. "
+            "Falling back to 'preview' for the rest of this session.",
+            status, final_url,
+        )
+        self._image_size = "preview"
+
     @contextmanager
     def stream_preview(self, asset_id: str) -> Iterator[requests.Response]:
         """Yield a streaming `requests.Response` at the configured `image_size`.
@@ -327,6 +352,9 @@ class ImmichClient:
         Used by the HTTP control plane to proxy image bytes to clients
         without ever writing to disk. Caller reads via `.iter_content()`
         and may forward `Content-Type` / `Content-Length` headers.
+
+        Falls back to `preview` on 401/403 with `fullsize`, same as
+        `download_preview()`.
         """
         url = self._url(f"/assets/{asset_id}/thumbnail")
         try:
@@ -340,11 +368,23 @@ class ImmichClient:
         except requests.RequestException as e:
             raise ImmichError(f"thumbnail stream {asset_id}: {e}") from e
         try:
+            if r.status_code in (401, 403) and self._image_size == "fullsize":
+                self._fallback_to_preview(asset_id, r.status_code, r.url)
+                r.close()
+                with self.stream_preview(asset_id) as r2:  # retry once at new size
+                    yield r2
+                return
             if r.status_code >= 400:
-                raise ImmichError(f"thumbnail stream {asset_id}: {r.status_code}")
+                raise ImmichError(
+                    f"thumbnail stream {asset_id}: {r.status_code} "
+                    f"(final URL: {r.url})"
+                )
             yield r
         finally:
-            r.close()
+            try:
+                r.close()
+            except Exception:
+                pass
 
     # ── Video (consumed by python-mpv) ──────────────────────────────────
     def video_play_args(self, asset_id: str) -> tuple[str, dict[str, str]]:

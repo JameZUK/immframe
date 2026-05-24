@@ -228,6 +228,42 @@ def test_download_preview_passes_image_size(tmp_path: Path):
     assert "size=fullsize" in captured["url"]
 
 
+@responses.activate
+def test_download_preview_falls_back_to_preview_on_403(tmp_path: Path):
+    """Common case: API key has 'view' permission but not 'download', so
+    fullsize (which redirects to /original) returns 403. We should auto-
+    fall-back to preview and succeed."""
+    sizes_seen = []
+
+    def cb(request):
+        sizes_seen.append(request.url)
+        if "size=fullsize" in request.url:
+            return (403, {}, b"")
+        return (200, {"Content-Type": "image/jpeg"}, b"\xff\xd8\xff\xd9JPEG")
+
+    responses.add_callback(responses.GET, f"{BASE}/api/assets/aid/thumbnail", callback=cb)
+    c = ImmichClient(BASE, "k", image_size="fullsize")
+    c.download_preview("aid", tmp_path / "out.jpg")
+
+    assert (tmp_path / "out.jpg").read_bytes() == b"\xff\xd8\xff\xd9JPEG"
+    # First attempt was fullsize (403), second was preview (200)
+    assert any("size=fullsize" in u for u in sizes_seen)
+    assert any("size=preview" in u for u in sizes_seen)
+    # Permanent switch — internal state now preview
+    assert c._image_size == "preview"
+
+
+@responses.activate
+def test_download_preview_preview_403_still_raises(tmp_path: Path):
+    """A 403 on preview is not auto-fallback territory — propagate."""
+    responses.add(
+        responses.GET, f"{BASE}/api/assets/aid/thumbnail", status=403,
+    )
+    c = ImmichClient(BASE, "k", image_size="preview")
+    with pytest.raises(ImmichError, match="403"):
+        c.download_preview("aid", tmp_path / "out.jpg")
+
+
 def test_invalid_image_size_rejected():
     with pytest.raises(ValueError, match="image_size"):
         ImmichClient(BASE, "k", image_size="huge")
