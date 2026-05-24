@@ -32,12 +32,19 @@ class VideoFrameExtractor:
 class _ImageLoader:
     """Drop-in replacement for picframe.get_image_meta.GetImageMeta.
 
-    Immich's preview JPEGs are already pre-rotated, so PIL.Image.open is all
-    we need — no HEIF or EXIF orientation handling required.
+    Applies EXIF orientation via PIL.ImageOps.exif_transpose so the image
+    is always upright regardless of source:
+      - Immich `preview` JPEGs are already pre-rotated (no orientation EXIF,
+        so exif_transpose is a no-op)
+      - Immich `fullsize` redirects to /original which serves the original
+        file — that file may carry orientation EXIF that needs applying
+        to render correctly.
     """
     @staticmethod
     def get_image_object(fname):
-        return Image.open(fname)
+        from PIL import ImageOps
+        im = Image.open(fname)
+        return ImageOps.exif_transpose(im) or im
 
 
 get_image_meta = type("get_image_meta", (), {"GetImageMeta": _ImageLoader})
