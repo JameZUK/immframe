@@ -190,3 +190,40 @@ def test_scene_respects_field_name():
     sel.next_batch(1)
     # search_smart called with one of the people values
     assert client.search_smart.call_args.args[0] in ("Alice", "Bob")
+
+
+def test_scene_falls_back_to_other_facet_when_things_missing():
+    """Newer Immich versions may rename the 'things' facet — auto-discover
+    a usable one rather than logging silence."""
+    client = MagicMock()
+    client.explore.return_value = {
+        "categories": ["beach", "mountain"],   # not "things"
+        "people": ["Alice"],                   # ignored — names aren't scenes
+    }
+    client.search_smart.return_value = [_a("ok")]
+
+    sel = SceneSelector(client)               # default field_name="things"
+    out = sel.next_batch(1)
+    assert out and out[0].id == "ok"
+    # search_smart was called with one of the fallback scene values
+    assert client.search_smart.call_args.args[0] in ("beach", "mountain")
+
+
+def test_scene_does_not_fall_back_to_people():
+    """If only 'people' is available, scene mode stays empty rather than
+    feeding face names into CLIP search (where they don't work well)."""
+    client = MagicMock()
+    client.explore.return_value = {"people": ["Alice", "Bob"]}
+    sel = SceneSelector(client)
+    assert sel.next_batch(5) == []
+    client.search_smart.assert_not_called()
+
+
+def test_scene_explicit_people_field_works_alone():
+    """When the user explicitly asks for the people facet, we honor it."""
+    client = MagicMock()
+    client.explore.return_value = {"people": ["Alice"]}
+    client.search_smart.return_value = [_a("p")]
+    sel = SceneSelector(client, field_name="people")
+    out = sel.next_batch(1)
+    assert out[0].id == "p"

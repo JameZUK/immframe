@@ -206,6 +206,7 @@ immframe show-text title,date,location
 immframe clock on|off
 immframe immich-ping         # verify Immich reachable
 immframe random 5            # list 5 random asset IDs from Immich
+immframe explore             # dump Immich's /search/explore facets (scene-mode debug)
 ```
 
 ## 6. Run on boot (optional)
@@ -261,7 +262,7 @@ systemctl --user restart immframe          # if running under systemd
 | `ImmichError: ... 401` | API key wrong or `immich.api_key` empty in config |
 | `ImmichError: ... ConnectionError` | URL wrong, or Immich unreachable from the Pi |
 | Black screen forever | No assets matched the current selection — try `--log-level DEBUG` |
-| Scene mode produces no slides | Immich hasn't finished CLIP classification yet — check Immich → Administration → Jobs |
+| Scene mode produces no slides | Immich hasn't finished CLIP classification yet — check Immich → Administration → Jobs. Run `immframe explore` to see what facets Immich is exposing. |
 | Dashboard / API responds 401 | Auth credentials mismatch between config and request |
 | Dashboard unreachable | `control.http.bind` is `127.0.0.1` (default); set to `0.0.0.0` for LAN access |
 | HA doesn't discover the device | `control.mqtt.enabled: true`?  broker reachable?  same broker as HA's MQTT integration? |

@@ -266,6 +266,11 @@ You can show it on the dashboard with a regular `entities` card.
 > processing on your library. Check Immich → Administration → Jobs.
 > If the jobs are still queued you'll see no scenes — the selector logs
 > a warning and the slideshow just keeps the previous slide on screen.
+>
+> Run `immframe explore` to see what facets Immich is returning. If you
+> see something like `categories` or `clip-labels` instead of `things`,
+> immframe will automatically fall back to using it — no config change
+> needed.
 
 ## Troubleshooting
 

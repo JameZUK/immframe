@@ -82,6 +82,11 @@ def _build_parser() -> argparse.ArgumentParser:
     random_p = sub.add_parser("random", help="Pull N random asset IDs from Immich (direct)")
     random_p.add_argument("count", type=int, nargs="?", default=5)
 
+    sub.add_parser(
+        "explore",
+        help="Dump Immich's /search/explore facets (scene-mode debug)",
+    )
+
     return parser
 
 
@@ -190,6 +195,8 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return _cmd_immich_ping(config)
     if cmd == "random":
         return _cmd_immich_random(config, args.count)
+    if cmd == "explore":
+        return _cmd_immich_explore(config)
 
     session, base = _http_client(config)
 
@@ -257,6 +264,34 @@ def _cmd_immich_ping(config: Config) -> int:
         c.close()
     print("pong" if ok else "no response")
     return 0 if ok else 1
+
+
+def _cmd_immich_explore(config: Config) -> int:
+    c = ImmichClient(config.immich.url, config.immich.api_key, timeout_s=10.0)
+    try:
+        try:
+            result = c.explore()
+        except ImmichError as e:
+            raise _CliError(str(e)) from e
+    finally:
+        c.close()
+    if not result:
+        print(
+            "(empty)\n"
+            "\n"
+            "Immich's /search/explore returned no facets. This usually means\n"
+            "smart-search / CLIP classification jobs haven't completed.\n"
+            "Check Immich -> Administration -> Jobs -> Smart Search."
+        )
+        return 1
+    print(f"Available facets: {sorted(result.keys())}\n")
+    for field_name in sorted(result.keys()):
+        values = result[field_name]
+        print(f"{field_name} ({len(values)} values):")
+        for v in values:
+            print(f"  {v}")
+        print()
+    return 0
 
 
 def _cmd_immich_random(config: Config, count: int) -> int:

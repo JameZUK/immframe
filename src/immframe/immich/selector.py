@@ -181,13 +181,39 @@ class SceneSelector:
             except ImmichError as e:
                 log.warning("explore failed: %s", e)
                 return
-            self._scenes = list(explore.get(self._field_name, []))
-            if not self._scenes:
+
+            scenes = list(explore.get(self._field_name, []))
+
+            # If the configured field isn't present (or is empty), fall back
+            # to any other non-people facet. This makes scene mode survive
+            # Immich version changes that rename "things" without us having
+            # to follow each rename.
+            if not scenes and self._field_name != "people":
+                facets = sorted(explore.keys())
+                for k, v in explore.items():
+                    if k == "people":          # names aren't scenes
+                        continue
+                    if v:
+                        log.info(
+                            "scene field %r not present (got %s); "
+                            "falling back to %r",
+                            self._field_name, facets, k,
+                        )
+                        scenes = list(v)
+                        self._field_name = k    # cache the discovery
+                        break
+
+            if not scenes:
                 log.info(
-                    "explore returned no %r facet — has Immich finished "
-                    "classifying the library?", self._field_name,
+                    "explore returned no usable facets (got %s) — has "
+                    "Immich finished smart-search classification? Check "
+                    "Immich → Administration → Jobs → Smart Search. "
+                    "Run `immframe explore` to see the raw response.",
+                    sorted(explore.keys()) or "nothing",
                 )
                 return
+
+            self._scenes = scenes
 
         self._current_scene = random.choice(self._scenes)
         log.info("scene rotation -> %r", self._current_scene)
