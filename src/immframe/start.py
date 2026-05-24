@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("next", help="Force-advance to the next slide")
 
     mode_p = sub.add_parser("mode", help="Set selection mode")
-    mode_p.add_argument("mode", choices=("random", "album", "smart", "scene"))
+    mode_p.add_argument("mode", choices=("random", "album", "smart", "scene", "people"))
 
     br_p = sub.add_parser("brightness", help="Set brightness (0.0 - 1.0)")
     br_p.add_argument("value", type=float)
@@ -63,6 +63,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     query_p = sub.add_parser("query", help="Set smart-search query")
     query_p.add_argument("text", help='e.g. "family at the beach"')
+
+    people_p = sub.add_parser(
+        "people-ids", help="Set people UUIDs to filter on (comma-separated; empty = rotate all named)",
+    )
+    people_p.add_argument("ids", help='e.g. "uuid-1,uuid-2" or "" to rotate all')
+
+    sub.add_parser("list-people", help="List named people from Immich (id\\tname)")
 
     delay_p = sub.add_parser("delay", help="Set slide duration in seconds")
     delay_p.add_argument("seconds", type=float)
@@ -197,6 +204,8 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return _cmd_immich_random(config, args.count)
     if cmd == "explore":
         return _cmd_immich_explore(config)
+    if cmd == "list-people":
+        return _cmd_immich_list_people(config)
 
     session, base = _http_client(config)
 
@@ -232,6 +241,10 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return 0
     if cmd == "query":
         _post(session, f"{base}/api/smart_query", {"value": args.text})
+        return 0
+    if cmd == "people-ids":
+        ids = [t.strip() for t in args.ids.split(",") if t.strip()]
+        _post(session, f"{base}/api/people_ids", {"value": ids})
         return 0
     if cmd == "delay":
         _post(session, f"{base}/api/time_delay", {"value": args.seconds})
@@ -291,6 +304,22 @@ def _cmd_immich_explore(config: Config) -> int:
         for v in values:
             print(f"  {v}")
         print()
+    return 0
+
+
+def _cmd_immich_list_people(config: Config) -> int:
+    c = ImmichClient(config.immich.url, config.immich.api_key, timeout_s=15.0)
+    try:
+        try:
+            people = c.list_people()
+        except ImmichError as e:
+            raise _CliError(str(e)) from e
+    finally:
+        c.close()
+    named = [p for p in people if p.get("name") and not p.get("isHidden")]
+    print(f"# {len(named)} named people (of {len(people)} total clusters)")
+    for p in sorted(named, key=lambda x: x.get("name", "")):
+        print(f"{p['id']}\t{p['name']}")
     return 0
 
 

@@ -27,6 +27,7 @@ from .immich.prefetch import PrefetchWorker
 from .immich.selector import (
     AlbumSelector,
     AssetSelector,
+    PeopleSelector,
     RandomSelector,
     SceneSelector,
     SmartSelector,
@@ -107,6 +108,7 @@ class Pic:
         self.exif_datetime = asset.taken_at.timestamp() if asset.taken_at is not None else 0.0
         self.location = _format_location(asset)
         self.people = ", ".join(asset.people) if asset.people else None
+        self.tags = ", ".join(asset.tag_names) if asset.tag_names else None
 
 
 def _format_location(asset: Asset) -> str | None:
@@ -118,7 +120,7 @@ def _format_location(asset: Asset) -> str | None:
 # its POST /api/show_text validator. The viewer (viewer/display.py) has its
 # own bit map keyed by the same names — keep both lists in sync when adding
 # a field. Order matches the viewer's bit assignment (1, 2, 4, 8, 16, 32, 64).
-SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder", "people")
+SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder", "people", "tags")
 
 
 def _parse_show_text(value: object) -> list[str]:
@@ -146,6 +148,7 @@ class Controller:
         self._selection_mode: SelectionMode = config.selection.default_mode
         self._album_ids: list[str] = list(config.selection.album_ids)
         self._smart_query: str = config.selection.smart_query
+        self._people_ids: list[str] = list(config.selection.people_ids)
 
         # Viewer-bound shadow state. Setters write here AND (when viewer is
         # up) to the viewer. `_sync_to_viewer()` reapplies at start() so any
@@ -164,6 +167,7 @@ class Controller:
             config.immich.url,
             config.immich.api_key,
             timeout_s=config.immich.timeout_s,
+            image_size=config.immich.image_size,
         )
 
         # Build initial selector
@@ -365,7 +369,7 @@ class Controller:
 
     @selection_mode.setter
     def selection_mode(self, mode: SelectionMode) -> None:
-        if mode not in ("random", "album", "smart", "scene"):
+        if mode not in ("random", "album", "smart", "scene", "people"):
             raise ValueError(f"unknown selection_mode: {mode!r}")
         self._selection_mode = mode
         self._selector = self._build_selector(mode)
@@ -395,6 +399,19 @@ class Controller:
         self._smart_query = q
         if isinstance(self._selector, SmartSelector):
             self._selector.set_query(q)
+            self._prefetch.drain()
+            self._force_next_evt.set()
+        self._publish_state()
+
+    @property
+    def people_ids(self) -> list[str]:
+        return list(self._people_ids)
+
+    @people_ids.setter
+    def people_ids(self, ids: list[str]) -> None:
+        self._people_ids = list(ids)
+        if isinstance(self._selector, PeopleSelector):
+            self._selector.set_person_ids(self._people_ids)
             self._prefetch.drain()
             self._force_next_evt.set()
         self._publish_state()
@@ -490,9 +507,9 @@ class Controller:
 
     @property
     def current_scene(self) -> str | None:
-        """When `selection_mode == "scene"`, the label currently driving
-        selection; None otherwise."""
-        if isinstance(self._selector, SceneSelector):
+        """When `selection_mode` is "scene" or "people", the label / person
+        name currently driving selection; None otherwise."""
+        if isinstance(self._selector, (SceneSelector, PeopleSelector)):
             return self._selector.current_scene
         return None
 
@@ -536,4 +553,6 @@ class Controller:
             return SmartSelector(self._client, self._smart_query)
         if mode == "scene":
             return SceneSelector(self._client)
+        if mode == "people":
+            return PeopleSelector(self._client, self._people_ids)
         raise ValueError(f"unknown selection_mode: {mode!r}")

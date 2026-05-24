@@ -110,7 +110,45 @@ def test_random_assets_omits_videos_when_asked():
     responses.add_callback(responses.POST, f"{BASE}/api/search/random", callback=cb, content_type="application/json")
     c = ImmichClient(BASE, "k")
     c.random_assets(3, with_video=False)
-    assert captured["body"] == {"size": 3, "type": "IMAGE"}
+    body = captured["body"]
+    assert body["size"] == 3
+    assert body["type"] == "IMAGE"
+    # withExif and withPeople MUST be set or Immich strips that data from the
+    # response — this regresses to null camera/city/country/people across
+    # the whole app.
+    assert body["withExif"] is True
+    assert body["withPeople"] is True
+
+
+@responses.activate
+def test_search_smart_sets_with_flags():
+    captured = {}
+    def cb(request):
+        import json
+        captured["body"] = json.loads(request.body)
+        return (200, {"Content-Type": "application/json"},
+                '{"assets":{"items":[],"count":0,"facets":[],"nextPage":null,"total":0},"albums":{"items":[],"count":0,"facets":[],"total":0}}')
+    responses.add_callback(responses.POST, f"{BASE}/api/search/smart", callback=cb)
+    c = ImmichClient(BASE, "k")
+    c.search_smart("beach", count=5)
+    assert captured["body"]["withExif"] is True
+    assert captured["body"]["withPeople"] is True
+
+
+@responses.activate
+def test_search_metadata_sets_with_flags():
+    captured = {}
+    def cb(request):
+        import json
+        captured["body"] = json.loads(request.body)
+        return (200, {"Content-Type": "application/json"},
+                '{"assets":{"items":[],"count":0,"facets":[],"nextPage":null,"total":0},"albums":{"items":[],"count":0,"facets":[],"total":0}}')
+    responses.add_callback(responses.POST, f"{BASE}/api/search/metadata", callback=cb)
+    c = ImmichClient(BASE, "k")
+    c.search_metadata(city="Alrewas", count=5)
+    assert captured["body"]["withExif"] is True
+    assert captured["body"]["withPeople"] is True
+    assert captured["body"]["city"] == "Alrewas"
 
 
 @responses.activate
@@ -174,6 +212,25 @@ def test_video_play_args_returns_url_and_header():
     url, hdrs = c.video_play_args("vid")
     assert url == f"{BASE}/api/assets/vid/video/playback"
     assert hdrs == {"x-api-key": "k"}
+
+
+@responses.activate
+def test_download_preview_passes_image_size(tmp_path: Path):
+    captured = {}
+
+    def cb(request):
+        captured["url"] = request.url
+        return (200, {"Content-Type": "image/jpeg"}, b"\xff\xd8\xff\xd9")
+
+    responses.add_callback(responses.GET, f"{BASE}/api/assets/aid/thumbnail", callback=cb)
+    c = ImmichClient(BASE, "k", image_size="fullsize")
+    c.download_preview("aid", tmp_path / "out.jpg")
+    assert "size=fullsize" in captured["url"]
+
+
+def test_invalid_image_size_rejected():
+    with pytest.raises(ValueError, match="image_size"):
+        ImmichClient(BASE, "k", image_size="huge")
 
 
 @responses.activate
@@ -242,6 +299,44 @@ def test_explore_non_list_raises():
 
 
 @responses.activate
+def test_list_people_filters_non_dict_entries():
+    responses.add(
+        responses.GET,
+        f"{BASE}/api/people",
+        json={
+            "people": [
+                {"id": "p1", "name": "Alice", "isHidden": False},
+                {"id": "p2", "name": "", "isHidden": False},
+                "garbage",
+                {"id": "p3", "name": "Bob", "isHidden": True},
+            ],
+            "total": 4,
+            "hidden": 1,
+        },
+    )
+    c = ImmichClient(BASE, "k")
+    people = c.list_people()
+    # All dict entries returned; the selector decides which to use
+    ids = [p["id"] for p in people]
+    assert ids == ["p1", "p2", "p3"]
+
+
+@responses.activate
+def test_list_people_passes_with_hidden_param():
+    captured = {}
+
+    def cb(request):
+        captured["query"] = request.url
+        return (200, {"Content-Type": "application/json"},
+                '{"people": [], "total": 0, "hidden": 0}')
+
+    responses.add_callback(responses.GET, f"{BASE}/api/people", callback=cb)
+    c = ImmichClient(BASE, "k")
+    c.list_people(include_hidden=True)
+    assert "withHidden=true" in captured["query"]
+
+
+@responses.activate
 def test_search_metadata_passes_filters():
     captured = {}
 
@@ -257,10 +352,12 @@ def test_search_metadata_passes_filters():
         taken_after=datetime(2024, 1, 1, tzinfo=timezone.utc),
         country="Iceland",
         tag_ids=["t1", "t2"],
+        person_ids=["pa", "pb"],
         count=10,
     )
     body = captured["body"]
     assert body["country"] == "Iceland"
     assert body["tagIds"] == ["t1", "t2"]
+    assert body["personIds"] == ["pa", "pb"]
     assert body["size"] == 10
     assert "takenAfter" in body

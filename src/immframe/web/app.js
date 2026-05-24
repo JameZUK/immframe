@@ -58,12 +58,12 @@ function render(state) {
     $("mode").value = state.selection_mode;
     $("album-ids").value = (state.album_ids || []).join(", ");
     $("smart-query").value = state.smart_query || "";
+    $("people-ids").value = (state.people_ids || []).join(", ");
 
-    // Scene mode is read-only on the dashboard: Immich rotates the scene
-    // for us; we just surface what's currently driving the slideshow.
-    const sceneActive = state.selection_mode === "scene";
-    $("scene-row").hidden = !sceneActive;
-    if (sceneActive) {
+    // For scene and people modes, surface the current label
+    const showLabel = state.selection_mode === "scene" || state.selection_mode === "people";
+    $("scene-row").hidden = !showLabel;
+    if (showLabel) {
       $("current-scene").textContent = state.current_scene || "(loading)";
     }
 
@@ -177,6 +177,13 @@ function wire() {
     safePost("/api/smart_query", $("smart-query").value);
   }, DEBOUNCE_MS);
   $("smart-query").addEventListener("input", smartCommit);
+
+  const peopleIdsCommit = debounce(() => {
+    if (suppressInput) return;
+    const ids = $("people-ids").value.split(",").map(s => s.trim()).filter(Boolean);
+    safePost("/api/people_ids", ids);
+  }, DEBOUNCE_MS);
+  $("people-ids").addEventListener("input", peopleIdsCommit);
 
   const brightnessCommit = debounce(() => {
     if (suppressInput) return;

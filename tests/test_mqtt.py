@@ -28,6 +28,7 @@ class _StubController:
         self.selection_mode = "random"
         self.album_ids = ["a", "b"]
         self.smart_query = "sunsets"
+        self.people_ids = []
         self.brightness = 1.0
         self.display_is_on = True
         self.show_text = ["title", "date"]
@@ -311,7 +312,7 @@ def test_on_connect_publishes_select_options(mqtt_mod):
         if c.args[0].startswith(f"{DISCOVERY_PREFIX}/select/")
     )
     payload = json.loads(select_call.args[1])
-    assert payload["options"] == ["random", "album", "smart", "scene"]
+    assert payload["options"] == ["random", "album", "smart", "scene", "people"]
 
 
 def test_on_connect_publishes_state(mqtt_mod):

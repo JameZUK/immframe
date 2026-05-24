@@ -38,8 +38,14 @@ class ImmichClient:
     """
 
     AUTH_HEADER = "x-api-key"
-    PREVIEW_SIZE = "preview"            # AssetMediaSize: original|fullsize|preview|thumbnail
     _API_PREFIX = "/api"
+
+    # AssetMediaSize enum. `fullsize` returns the original-resolution JPEG
+    # (transcoded for HEIC/RAW), 302-redirecting to /assets/{id}/original
+    # behind the scenes — requests follows redirects by default.
+    SIZE_PREVIEW = "preview"              # ~1440x2560
+    SIZE_FULLSIZE = "fullsize"            # original resolution, JPEG
+    VALID_IMAGE_SIZES = frozenset({SIZE_PREVIEW, SIZE_FULLSIZE})
 
     def __init__(
         self,
@@ -48,10 +54,16 @@ class ImmichClient:
         *,
         timeout_s: float = 10.0,
         session: requests.Session | None = None,
+        image_size: str = SIZE_FULLSIZE,
     ) -> None:
         self._base = base_url.rstrip("/") + self._API_PREFIX
         self._api_key = api_key
         self._timeout = timeout_s
+        if image_size not in self.VALID_IMAGE_SIZES:
+            raise ValueError(
+                f"image_size must be one of {sorted(self.VALID_IMAGE_SIZES)}; got {image_size!r}"
+            )
+        self._image_size = image_size
         if session is None:
             self._session = requests.Session()
             self._owns_session = True
@@ -107,8 +119,17 @@ class ImmichClient:
 
     # ── Asset selection ─────────────────────────────────────────────────
     def random_assets(self, count: int, *, with_video: bool = True) -> list[Asset]:
-        """POST /search/random — returns array of asset DTOs directly."""
-        body: dict[str, Any] = {"size": count}
+        """POST /search/random — returns array of asset DTOs directly.
+
+        Always sets `withExif: true` and `withPeople: true` — without these
+        flags Immich strips exifInfo / people from the response, leaving
+        camera, city, country, taken_at and overlay-people fields null.
+        """
+        body: dict[str, Any] = {
+            "size": count,
+            "withExif": True,
+            "withPeople": True,
+        }
         if not with_video:
             body["type"] = "IMAGE"
         data = self._post("/search/random", json=body)
@@ -118,7 +139,12 @@ class ImmichClient:
 
     def search_smart(self, query: str, *, count: int = 20) -> list[Asset]:
         """POST /search/smart — returns SearchResponseDto with assets.items."""
-        body = {"query": query, "size": count}
+        body = {
+            "query": query,
+            "size": count,
+            "withExif": True,
+            "withPeople": True,
+        }
         data = self._post("/search/smart", json=body)
         return _items_from_search(data)
 
@@ -130,10 +156,15 @@ class ImmichClient:
         city: str | None = None,
         country: str | None = None,
         tag_ids: Iterable[str] | None = None,
+        person_ids: Iterable[str] | None = None,
         count: int = 20,
     ) -> list[Asset]:
         """POST /search/metadata with structured filters."""
-        body: dict[str, Any] = {"size": count}
+        body: dict[str, Any] = {
+            "size": count,
+            "withExif": True,
+            "withPeople": True,
+        }
         if taken_after is not None:
             body["takenAfter"] = taken_after.isoformat()
         if taken_before is not None:
@@ -144,8 +175,43 @@ class ImmichClient:
             body["country"] = country
         if tag_ids is not None:
             body["tagIds"] = list(tag_ids)
+        if person_ids is not None:
+            body["personIds"] = list(person_ids)
         data = self._post("/search/metadata", json=body)
         return _items_from_search(data)
+
+    def list_people(
+        self, *, include_hidden: bool = False, size: int = 500,
+    ) -> list[dict[str, Any]]:
+        """GET /people — returns the named-people list (paginated).
+
+        Each entry is a dict with at least `id`, `name`, `isHidden`. Empty
+        names mean unnamed face clusters; we leave the filtering to the
+        caller so they can decide whether to include them.
+
+        Pages through `hasNextPage` until exhausted (one page if no
+        nextPage signal). On libraries with thousands of face clusters
+        (mostly unnamed) this can hit the API a few times — sufficient
+        for our use, which is one-shot index building at startup.
+        """
+        params: dict[str, Any] = {"size": size}
+        if include_hidden:
+            params["withHidden"] = "true"
+        out: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            params["page"] = page
+            data = self._get("/people", params=params)
+            if not isinstance(data, dict):
+                raise ImmichError("/people: expected object")
+            people = data.get("people") or []
+            out.extend(p for p in people if isinstance(p, dict))
+            if not data.get("hasNextPage"):
+                break
+            page += 1
+            if page > 50:                                 # safety stop
+                break
+        return out
 
     def album_assets(self, album_id: str) -> list[Asset]:
         """GET /albums/{id} — returns AlbumResponseDto with `assets` array."""
@@ -184,11 +250,20 @@ class ImmichClient:
 
     # ── Bytes ───────────────────────────────────────────────────────────
     def download_preview(self, asset_id: str, dest: Path) -> None:
-        """Stream the preview JPEG to `dest`. Atomic (tmp file + rename)."""
+        """Stream the configured-size JPEG to `dest`. Atomic (tmp + rename).
+
+        Uses the `image_size` from the constructor:
+        - `preview` (~1440x2560)
+        - `fullsize` (original-resolution JPEG; transcoded for HEIC/RAW).
+          The /thumbnail endpoint 302-redirects fullsize to
+          /assets/{id}/original — `requests` follows redirects by default
+          and re-sends the API key header.
+        """
         url = self._url(f"/assets/{asset_id}/thumbnail")
         try:
             with self._session.get(
-                url, params={"size": self.PREVIEW_SIZE}, stream=True, timeout=self._timeout
+                url, params={"size": self._image_size}, stream=True,
+                timeout=self._timeout, allow_redirects=True,
             ) as r:
                 if r.status_code >= 400:
                     raise ImmichError(f"thumbnail {asset_id}: {r.status_code}")
@@ -203,21 +278,20 @@ class ImmichClient:
 
     @contextmanager
     def stream_preview(self, asset_id: str) -> Iterator[requests.Response]:
-        """Yield a streaming `requests.Response` for the preview JPEG.
+        """Yield a streaming `requests.Response` at the configured `image_size`.
 
         Used by the HTTP control plane to proxy image bytes to clients
         without ever writing to disk. Caller reads via `.iter_content()`
         and may forward `Content-Type` / `Content-Length` headers.
-
-        Raises `ImmichError` on any failure.
         """
         url = self._url(f"/assets/{asset_id}/thumbnail")
         try:
             r = self._session.get(
                 url,
-                params={"size": self.PREVIEW_SIZE},
+                params={"size": self._image_size},
                 stream=True,
                 timeout=self._timeout,
+                allow_redirects=True,
             )
         except requests.RequestException as e:
             raise ImmichError(f"thumbnail stream {asset_id}: {e}") from e

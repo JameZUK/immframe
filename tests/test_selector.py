@@ -6,6 +6,8 @@ from immframe.immich.client import ImmichError
 from immframe.immich.models import Asset, AssetKind, GeoInfo
 from immframe.immich.selector import (
     AlbumSelector,
+    CURATED_SCENE_QUERIES,
+    PeopleSelector,
     RandomSelector,
     SceneSelector,
     SmartSelector,
@@ -117,21 +119,83 @@ def test_smart_set_query_replaces():
 # ── SceneSelector ───────────────────────────────────────────────────────
 
 
-def test_scene_picks_random_scene_from_explore_and_queries_it():
+def test_scene_prefers_things_facet_when_present():
     client = MagicMock()
-    client.explore.return_value = {"things": ["beach", "mountain"]}
+    client.explore.return_value = {"things": ["beach", "mountain"], "exifInfo.city": ["Paris"]}
     client.search_smart.return_value = [_a("s1"), _a("s2")]
 
     sel = SceneSelector(client, pool_size=5)
     batch = sel.next_batch(2)
 
-    client.explore.assert_called_once()
+    assert sel.mode == "things"
     client.search_smart.assert_called_once()
-    # The scene query goes to whichever scene was picked
     chosen = client.search_smart.call_args.args[0]
     assert chosen in ("beach", "mountain")
     assert sel.current_scene == chosen
     assert {a.id for a in batch} == {"s1", "s2"}
+
+
+def test_scene_uses_city_when_things_missing():
+    """The bug from the field: Immich only surfaces city facets. Scene mode
+    should use them via search_metadata(city=...) instead of giving up."""
+    client = MagicMock()
+    client.explore.return_value = {"exifInfo.city": ["Amsterdam", "Aberfeldy"]}
+    client.search_metadata.return_value = [_a("city-a")]
+
+    sel = SceneSelector(client)
+    batch = sel.next_batch(5)
+
+    assert sel.mode == "city"
+    # Used the city-filter endpoint, NOT smart search
+    client.search_smart.assert_not_called()
+    city = client.search_metadata.call_args.kwargs["city"]
+    assert city in ("Amsterdam", "Aberfeldy")
+    assert batch[0].id == "city-a"
+
+
+def test_scene_falls_back_to_curated_when_only_people_present():
+    """People are handled by PeopleSelector now — SceneSelector ignores
+    the people facet and falls back to curated CLIP queries."""
+    client = MagicMock()
+    client.explore.return_value = {"people": ["Alice", "Bob"]}
+    client.search_smart.return_value = [_a("curated-hit")]
+
+    sel = SceneSelector(client)
+    batch = sel.next_batch(5)
+
+    assert sel.mode == "curated"
+    assert batch[0].id == "curated-hit"
+
+
+def test_scene_falls_back_to_curated_when_nothing_useful():
+    """When Immich exposes nothing the selector can use — but smart search
+    itself still works — fall back to curated CLIP queries so the slideshow
+    isn't dead in the water."""
+    client = MagicMock()
+    client.explore.return_value = {}
+    client.list_people.return_value = []
+    client.search_smart.return_value = [_a("curated-hit")]
+
+    sel = SceneSelector(client)
+    batch = sel.next_batch(5)
+
+    assert sel.mode == "curated"
+    client.search_metadata.assert_not_called()
+    chosen = client.search_smart.call_args.args[0]
+    assert chosen in CURATED_SCENE_QUERIES
+    assert batch[0].id == "curated-hit"
+
+
+def test_scene_explore_error_falls_back_to_curated():
+    from immframe.immich.client import ImmichError
+    client = MagicMock()
+    client.explore.side_effect = ImmichError("upstream down")
+    client.search_smart.return_value = [_a("ok")]
+
+    sel = SceneSelector(client)
+    batch = sel.next_batch(1)
+    assert sel.mode == "curated"
+    assert batch[0].id == "ok"
 
 
 def test_scene_exhausts_pool_then_rotates():
@@ -148,82 +212,104 @@ def test_scene_exhausts_pool_then_rotates():
 
     assert {a.id for a in first} == {"a1", "a2"}
     assert {a.id for a in second} == {"b1", "b2"}
-    # Two smart-search calls = two scene rotations
     assert client.search_smart.call_count == 2
-    # Explore only called once — scene list is cached
-    assert client.explore.call_count == 1
 
 
-def test_scene_empty_explore_returns_empty():
-    client = MagicMock()
-    client.explore.return_value = {}
-    sel = SceneSelector(client)
-    assert sel.next_batch(5) == []
-
-
-def test_scene_explore_error_returns_empty():
-    from immframe.immich.client import ImmichError
-    client = MagicMock()
-    client.explore.side_effect = ImmichError("network down")
-    sel = SceneSelector(client)
-    assert sel.next_batch(5) == []
-
-
-def test_scene_smart_search_error_returns_empty_and_keeps_running():
+def test_scene_query_failure_does_not_block_subsequent():
     from immframe.immich.client import ImmichError
     client = MagicMock()
     client.explore.return_value = {"things": ["beach"]}
     client.search_smart.side_effect = ImmichError("upstream down")
+
     sel = SceneSelector(client, pool_size=5)
     assert sel.next_batch(5) == []
-    # Subsequent call retries
+    # Recover on next call
     client.search_smart.side_effect = [[_a("ok")]]
     assert sel.next_batch(5)[0].id == "ok"
 
 
-def test_scene_respects_field_name():
-    client = MagicMock()
-    client.explore.return_value = {"people": ["Alice", "Bob"]}
-    client.search_smart.return_value = [_a("p")]
+# ── PeopleSelector ──────────────────────────────────────────────────────
 
-    sel = SceneSelector(client, field_name="people")
+
+def test_people_explicit_ids_filters_to_those():
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "p1", "name": "Alice", "isHidden": False},
+        {"id": "p2", "name": "Bob", "isHidden": False},
+        {"id": "px", "name": "OtherPerson", "isHidden": False},
+    ]
+    client.search_metadata.return_value = [_a("shot")]
+
+    sel = PeopleSelector(client, person_ids=["p1", "p2"])
+    batch = sel.next_batch(2)
+
+    pid = client.search_metadata.call_args.kwargs["person_ids"]
+    assert pid in (["p1"], ["p2"])
+    assert sel.current_scene in ("Alice", "Bob")
+    assert batch[0].id == "shot"
+
+
+def test_people_empty_ids_rotates_all_named():
+    """Empty person_ids means "rotate through every named person"."""
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "p1", "name": "Alice", "isHidden": False},
+        {"id": "p2", "name": "Bob", "isHidden": False},
+        {"id": "p3", "name": "", "isHidden": False},        # unnamed
+        {"id": "p4", "name": "Charlie", "isHidden": True},  # hidden
+    ]
+    client.search_metadata.return_value = [_a("shot")]
+
+    sel = PeopleSelector(client)                # empty list
+    sel.next_batch(2)
+    person_ids = client.search_metadata.call_args.kwargs["person_ids"]
+    # Only named, non-hidden are eligible
+    assert person_ids[0] in ("p1", "p2")
+
+
+def test_people_set_person_ids_drains_pool():
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "p1", "name": "Alice", "isHidden": False},
+        {"id": "p2", "name": "Bob", "isHidden": False},
+    ]
+    client.search_metadata.return_value = [_a("shot")]
+
+    sel = PeopleSelector(client, person_ids=["p1"])
     sel.next_batch(1)
-    # search_smart called with one of the people values
-    assert client.search_smart.call_args.args[0] in ("Alice", "Bob")
+    client.search_metadata.reset_mock()
+
+    sel.set_person_ids(["p2"])
+    sel.next_batch(1)
+    assert client.search_metadata.call_args.kwargs["person_ids"] == ["p2"]
 
 
-def test_scene_falls_back_to_other_facet_when_things_missing():
-    """Newer Immich versions may rename the 'things' facet — auto-discover
-    a usable one rather than logging silence."""
+def test_people_empty_library_returns_empty():
     client = MagicMock()
-    client.explore.return_value = {
-        "categories": ["beach", "mountain"],   # not "things"
-        "people": ["Alice"],                   # ignored — names aren't scenes
-    }
-    client.search_smart.return_value = [_a("ok")]
-
-    sel = SceneSelector(client)               # default field_name="things"
-    out = sel.next_batch(1)
-    assert out and out[0].id == "ok"
-    # search_smart was called with one of the fallback scene values
-    assert client.search_smart.call_args.args[0] in ("beach", "mountain")
-
-
-def test_scene_does_not_fall_back_to_people():
-    """If only 'people' is available, scene mode stays empty rather than
-    feeding face names into CLIP search (where they don't work well)."""
-    client = MagicMock()
-    client.explore.return_value = {"people": ["Alice", "Bob"]}
-    sel = SceneSelector(client)
+    client.list_people.return_value = []
+    sel = PeopleSelector(client)
     assert sel.next_batch(5) == []
-    client.search_smart.assert_not_called()
 
 
-def test_scene_explicit_people_field_works_alone():
-    """When the user explicitly asks for the people facet, we honor it."""
+def test_people_metadata_error_returns_empty():
+    from immframe.immich.client import ImmichError
     client = MagicMock()
-    client.explore.return_value = {"people": ["Alice"]}
-    client.search_smart.return_value = [_a("p")]
-    sel = SceneSelector(client, field_name="people")
-    out = sel.next_batch(1)
-    assert out[0].id == "p"
+    client.list_people.return_value = [
+        {"id": "p1", "name": "Alice", "isHidden": False},
+    ]
+    client.search_metadata.side_effect = ImmichError("upstream")
+    sel = PeopleSelector(client)
+    assert sel.next_batch(5) == []
+
+
+def test_scene_force_mode_skips_discovery():
+    """Useful for tests and explicit user preference."""
+    client = MagicMock()
+    client.search_smart.return_value = [_a("forced")]
+
+    sel = SceneSelector(client, force_mode="curated")
+    batch = sel.next_batch(1)
+    assert sel.mode == "curated"
+    client.explore.assert_not_called()
+    client.list_people.assert_not_called()
+    assert batch[0].id == "forced"

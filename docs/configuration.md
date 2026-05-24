@@ -31,6 +31,7 @@ Top-level sections:
 | `url` | string | `https://immich.local` | Base URL of your Immich server. No trailing slash. immframe appends `/api`. |
 | `api_key` | string | `""` (required) | Immich API key. Create in *Immich → Account Settings → API Keys → New API Key*. `${ENV}` expansion supported. |
 | `timeout_s` | float | `10` | HTTP timeout (seconds) for every Immich call. |
+| `image_size` | enum | `fullsize` | `preview` (~1440px on the long edge) or `fullsize` (original-resolution JPEG; Immich transcodes HEIC/RAW). `fullsize` is right for 4K displays. |
 
 ```yaml
 immich:
@@ -45,17 +46,19 @@ immich:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `default_mode` | enum | `random` | One of `random`, `album`, `smart`, `scene`. |
+| `default_mode` | enum | `random` | One of `random`, `album`, `smart`, `scene`, `people`. |
 | `album_ids` | list[string] | `[]` | Album UUIDs to draw from when `default_mode = album`. Multiple albums are merged + shuffled. |
 | `smart_query` | string | `""` | CLIP query when `default_mode = smart`. e.g. `"family at the beach"`. |
+| `people_ids` | list[string] | `[]` | Person UUIDs to filter on when `default_mode = people`. Empty list = rotate through ALL named people in the library. Use `immframe list-people` to discover UUIDs. |
 | `prefetch_count` | int | `5` | How many slides to pre-download ahead of the renderer. Higher = smoother on slow networks, more temp-disk and RAM. |
 
-### The four modes
+### The five modes
 
 - **random** — `POST /api/search/random` across the whole library. Always something fresh.
 - **album** — Random within one or more albums. Curated.
 - **smart** — Immich's CLIP smart-search. Free-text. Requires the smart-search ML jobs to have run on your library.
-- **scene** — Picks a random CLIP scene label that Immich has auto-discovered (*beach*, *mountain*, *wedding*, *sunset*, …) and slideshows ~25 photos from it before rotating. Zero config. Discovered via `GET /api/search/explore`.
+- **scene** — Picks a random label that Immich has auto-discovered (*beach*, *Amsterdam*, *wedding*, …) and slideshows ~25 photos from it before rotating. **Multi-source with auto-fallback** in this priority order: `things` (CLIP scenes) → cities → curated CLIP queries. The curated fallback works whenever Immich's smart search is enabled, even when `/search/explore` doesn't surface anything useful.
+- **people** — Slideshow of photos featuring specific people. With `people_ids` empty, rotates through every named person in the library (one person's photos at a time). With UUIDs set, restricts to those. Find UUIDs via `immframe list-people`.
 
 You can switch modes at runtime via MQTT, HTTP, the dashboard, or `immframe mode <mode>` — config just sets the starting mode.
 
@@ -162,6 +165,7 @@ field appears on its own line in the overlay when its data is present.
 | `location` | Any of city / state / country present | "City, State, Country" — pulled straight from Immich's reverse-geocoded EXIF. |
 | `folder` | Always | Parent directory name of the cached file. Of limited use under immframe (cache files all live in one temp dir) — kept for picframe-config compatibility. |
 | `people` | Immich has named, non-hidden people tagged in the asset | Comma-separated names from face recognition. Skips unnamed face clusters and people marked hidden in Immich. |
+| `tags` | Asset has user-defined tags assigned in Immich | Comma-separated tag values. Note: Immich does **not** auto-generate "what's in the image" tags via CLIP — these are tags you (or Immich's importer) set explicitly. For literal "things detected", the closest is the OCR endpoint, which isn't yet surfaced in the overlay (see [docs/api-opportunities.md](./api-opportunities.md)). |
 
 You can also toggle these at runtime — via HA's `text.immframe_show_text`,
 `POST /api/show_text` (JSON list), the dashboard checkboxes, or

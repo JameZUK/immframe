@@ -64,10 +64,11 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("switch", "paused", "Paused", icon="mdi:pause"),
     Entity(
         "select", "selection_mode", "Selection mode",
-        options=("random", "album", "smart", "scene"), icon="mdi:image-multiple",
+        options=("random", "album", "smart", "scene", "people"), icon="mdi:image-multiple",
     ),
     Entity("text", "album_ids", "Album IDs", icon="mdi:image-album"),
     Entity("text", "smart_query", "Smart query", icon="mdi:magnify"),
+    Entity("text", "people_ids", "People IDs", icon="mdi:account-multiple"),
     Entity("button", "next", "Next", icon="mdi:skip-next", has_state=False),
 
     # Display
@@ -110,6 +111,8 @@ def _state_of(controller: "Controller", entity: Entity) -> str:
         return ", ".join(controller.album_ids)
     if oid == "smart_query":
         return controller.smart_query
+    if oid == "people_ids":
+        return ", ".join(controller.people_ids)
     if oid == "display_is_on":
         return "ON" if controller.display_is_on else "OFF"
     if oid == "brightness":
@@ -161,6 +164,8 @@ def _apply_cmd(controller: "Controller", entity: Entity, payload: str) -> None:
         controller.album_ids = [t.strip() for t in s.split(",") if t.strip()]
     elif oid == "smart_query":
         controller.smart_query = s
+    elif oid == "people_ids":
+        controller.people_ids = [t.strip() for t in s.split(",") if t.strip()]
     elif oid == "next":
         controller.next()
     elif oid == "display_is_on":

@@ -31,6 +31,7 @@ class _StubController:
         self.selection_mode = "random"
         self.album_ids: list[str] = ["00000000-0000-0000-0000-000000000001"]
         self.smart_query = ""
+        self.people_ids: list[str] = []
         self.brightness = 1.0
         self.display_is_on = True
         self.show_text: list[str] = ["title", "date"]

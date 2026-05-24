@@ -29,7 +29,7 @@ from typing import Any, Literal
 import yaml
 
 
-SelectionMode = Literal["random", "album", "smart", "scene"]
+SelectionMode = Literal["random", "album", "smart", "scene", "people"]
 
 _DEFAULT_YAML_PATH = Path(__file__).parent / "_defaults" / "default.yaml"
 _SEARCH_PATHS = (
@@ -76,6 +76,7 @@ class ImmichConfig:
     url: str
     api_key: str
     timeout_s: float = 10.0
+    image_size: str = "fullsize"               # 'preview' (~1440px) or 'fullsize' (original)
 
 
 @dataclass
@@ -83,6 +84,7 @@ class SelectionConfig:
     default_mode: SelectionMode = "random"
     album_ids: list[str] = field(default_factory=list)
     smart_query: str = ""
+    people_ids: list[str] = field(default_factory=list)  # empty = rotate all named people
     prefetch_count: int = 5
 
 
@@ -178,10 +180,16 @@ class Config:
             raise ValueError(
                 "immich.api_key is empty — set it inline or via ${ENV_VAR} substitution"
             )
+        image_size = immich_raw.get("image_size", "fullsize")
+        if image_size not in ("preview", "fullsize"):
+            raise ValueError(
+                f"immich.image_size must be 'preview' or 'fullsize'; got {image_size!r}"
+            )
         immich = ImmichConfig(
             url=immich_raw["url"].rstrip("/"),
             api_key=api_key,
             timeout_s=float(immich_raw.get("timeout_s", 10.0)),
+            image_size=image_size,
         )
 
         sel_raw = data.get("selection", {})
@@ -189,9 +197,10 @@ class Config:
             default_mode=sel_raw.get("default_mode", "random"),
             album_ids=list(sel_raw.get("album_ids", [])),
             smart_query=sel_raw.get("smart_query", ""),
+            people_ids=list(sel_raw.get("people_ids", [])),
             prefetch_count=int(sel_raw.get("prefetch_count", 5)),
         )
-        if selection.default_mode not in ("random", "album", "smart", "scene"):
+        if selection.default_mode not in ("random", "album", "smart", "scene", "people"):
             raise ValueError(f"selection.default_mode invalid: {selection.default_mode!r}")
 
         vid_raw = data.get("video", {})

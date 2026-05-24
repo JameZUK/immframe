@@ -11,6 +11,8 @@ immich:
   url: https://immich.local                # no trailing slash
   api_key: ""                              # required — set in your config.yaml
   timeout_s: 10
+  image_size: fullsize                     # 'preview' (~1440px) or 'fullsize' (original-res JPEG)
+                                            # — 'fullsize' is the right pick for 4K displays
 
 selection:
   default_mode: random                     # random | album | smart

@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
-_SELECTION_MODES = ("random", "album", "smart", "scene")
+_SELECTION_MODES = ("random", "album", "smart", "scene", "people")
 # Re-export the canonical list from the controller so additions land in one place.
 _SHOW_TEXT_KEYS = SHOW_TEXT_KEYS
 
@@ -77,6 +77,7 @@ _POST_PATHS = frozenset({
     "/api/selection_mode",
     "/api/album_ids",
     "/api/smart_query",
+    "/api/people_ids",
     "/api/next",
     "/api/brightness",
     "/api/display_is_on",
@@ -266,6 +267,16 @@ class _Handler(BaseHTTPRequestHandler):
             value = self._require_value(str)
             self._ctrl.smart_query = value
             return self._state()
+        if path == "/api/people_ids":
+            value = self._require_value(list)
+            for item in value:
+                if not isinstance(item, str) or not _ASSET_ID_RE.match(item):
+                    raise _HttpError(
+                        HTTPStatus.BAD_REQUEST,
+                        "people_ids must be a list of person UUIDs",
+                    )
+            self._ctrl.people_ids = value
+            return self._state()
         if path == "/api/next":
             self._ctrl.next()
             return self._empty(HTTPStatus.ACCEPTED)
@@ -334,6 +345,7 @@ class _Handler(BaseHTTPRequestHandler):
             "selection_mode": c.selection_mode,
             "album_ids": c.album_ids,
             "smart_query": c.smart_query,
+            "people_ids": c.people_ids,
             "current_scene": c.current_scene,
             "brightness": c.brightness,
             "display_is_on": c.display_is_on,

@@ -57,6 +57,7 @@ _SHOW_TEXT_BITS: dict[str, int] = {
     "location": 16,
     "folder": 32,
     "people": 64,
+    "tags": 128,
 }
 
 
@@ -462,6 +463,8 @@ class ViewerDisplay:
                 info_strings.append(os.path.basename(os.path.dirname(pic.fname)))
             if (self.__show_text & 64) == 64 and getattr(pic, "people", None):  # people
                 info_strings.append(pic.people)
+            if (self.__show_text & 128) == 128 and getattr(pic, "tags", None):  # tags
+                info_strings.append(pic.tags)
             if paused:
                 info_strings.append("PAUSED")
         final_string = " • ".join(info_strings)
