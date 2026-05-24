@@ -17,7 +17,23 @@ This document is the cure.
 
 ---
 
-## TL;DR
+## TL;DR — automated install
+
+```bash
+cd ~/immframe
+./scripts/setup-display.sh
+# preview first if you want:
+./scripts/setup-display.sh --dry-run
+# full hands-off install:
+./scripts/setup-display.sh --yes --reboot
+```
+
+The script is idempotent, backs up any file it overwrites, and verifies
+the final state. It does steps 1-7 below for you. The rest of this
+document explains what each step does — read it if you want to know
+what's happening or to do it by hand.
+
+## TL;DR — manual
 
 ```
 RPi OS Bookworm + labwc + autologin + autostart immframe
