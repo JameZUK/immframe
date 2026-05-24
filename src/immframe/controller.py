@@ -106,6 +106,7 @@ class Pic:
         self.caption = asset.caption
         self.exif_datetime = asset.taken_at.timestamp() if asset.taken_at is not None else 0.0
         self.location = _format_location(asset)
+        self.people = ", ".join(asset.people) if asset.people else None
 
 
 def _format_location(asset: Asset) -> str | None:
@@ -114,7 +115,7 @@ def _format_location(asset: Asset) -> str | None:
 
 
 # Order matches the picframe viewer's bit assignment (1, 2, 4, 8, 16, 32).
-SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder")
+SHOW_TEXT_KEYS: tuple[str, ...] = ("title", "caption", "name", "date", "location", "folder", "people")
 
 
 def _parse_show_text(value: object) -> list[str]:

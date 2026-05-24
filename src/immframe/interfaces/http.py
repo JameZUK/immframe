@@ -57,7 +57,7 @@ _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
 _SELECTION_MODES = ("random", "album", "smart", "scene")
-_SHOW_TEXT_KEYS = ("title", "caption", "name", "date", "location", "folder")
+_SHOW_TEXT_KEYS = ("title", "caption", "name", "date", "location", "folder", "people")
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 

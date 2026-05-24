@@ -24,6 +24,7 @@ def _a(aid: str, kind: AssetKind = AssetKind.IMAGE) -> Asset:
         title=None,
         caption=None,
         tag_names=(),
+        people=(),
         favorite=False,
     )
 

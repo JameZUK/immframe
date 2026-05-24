@@ -57,6 +57,7 @@ def _asset(aid: str = "xyz") -> Asset:
         title=None,
         caption=None,
         tag_names=(),
+        people=(),
         favorite=False,
     )
 

@@ -52,6 +52,7 @@ class Asset:
     title: str | None
     caption: str | None
     tag_names: tuple[str, ...]
+    people: tuple[str, ...]              # named (non-hidden) people from Immich
     favorite: bool
 
     @property

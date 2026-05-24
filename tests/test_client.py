@@ -34,6 +34,12 @@ def _asset_json(asset_id: str = "abc", kind: str = "IMAGE") -> dict:
             "model": "EOS R6",
             "description": "Sunset",
         },
+        "people": [
+            {"id": "p1", "name": "Alice", "isHidden": False, "thumbnailPath": "", "birthDate": ""},
+            {"id": "p2", "name": "Bob", "isHidden": False, "thumbnailPath": "", "birthDate": ""},
+            {"id": "p3", "name": "", "isHidden": False, "thumbnailPath": "", "birthDate": ""},
+            {"id": "p4", "name": "Hidden", "isHidden": True, "thumbnailPath": "", "birthDate": ""},
+        ],
         "tags": [{"value": "travel"}, {"value": "europe"}],
         "checksum": "x",
         "createdAt": "2024-06-15T12:00:00Z",
@@ -86,6 +92,8 @@ def test_random_assets_normalises():
     assert assets[0].camera_make == "Canon"
     assert assets[0].caption == "Sunset"
     assert assets[0].tag_names == ("travel", "europe")
+    # Only named, non-hidden people surface
+    assert assets[0].people == ("Alice", "Bob")
     assert assets[0].taken_at is not None
     assert assets[1].kind == AssetKind.VIDEO
 

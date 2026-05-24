@@ -259,6 +259,11 @@ def _to_asset(d: dict[str, Any]) -> Asset:
     """
     exif = d.get("exifInfo") or {}
     tags = d.get("tags") or []
+    people_raw = d.get("people") or []
+    people = tuple(
+        p.get("name") for p in people_raw
+        if isinstance(p, dict) and not p.get("isHidden") and p.get("name")
+    )
     return Asset(
         id=d["id"],
         kind=_KIND_MAP.get(d.get("type", "OTHER"), AssetKind.OTHER),
@@ -279,6 +284,7 @@ def _to_asset(d: dict[str, Any]) -> Asset:
         title=None,                                     # Immich has no separate title field
         caption=exif.get("description"),
         tag_names=tuple(t.get("value") or t.get("name") or "" for t in tags),
+        people=people,
         favorite=bool(d.get("isFavorite", False)),
     )
 

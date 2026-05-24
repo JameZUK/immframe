@@ -60,6 +60,7 @@ def _asset() -> Asset:
         title=None,
         caption=None,
         tag_names=(),
+        people=(),
         favorite=False,
     )
 
@@ -315,6 +316,15 @@ def test_post_show_text_rejects_unknown_keys():
                           json={"value": ["title", "everything"]},
                           timeout=2.0, auth=_auth())
         assert r.status_code == 400
+
+
+def test_post_show_text_accepts_people():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/show_text",
+                          json={"value": ["people", "date"]},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.show_text == ["people", "date"]
 
 
 def test_post_show_clock():

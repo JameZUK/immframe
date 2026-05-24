@@ -21,7 +21,7 @@ HA, and a complete Lovelace card example.
 | `number.immframe_brightness` | number (0.0–1.0) | Render brightness |
 | `number.immframe_time_delay` | number (1–3600 s) | Slide duration |
 | `number.immframe_fade_time` | number (0–30 s) | Crossfade duration |
-| `text.immframe_show_text` | text | Overlay fields (comma-separated, subset of `title,caption,name,date,location,folder`) |
+| `text.immframe_show_text` | text | Overlay fields (comma-separated, subset of `title,caption,name,date,location,folder,people`) |
 | `switch.immframe_show_clock` | switch | Show / hide the clock overlay |
 | `sensor.immframe_current_asset` | sensor | Current asset UUID; attributes carry file, taken_at, city, country, camera, kind, favorite, scene |
 
