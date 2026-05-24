@@ -4,5 +4,6 @@
 #
 # Runs when labwc itself starts. Use to launch immframe and any helpers.
 
-# Start the slideshow
-~/immframe/.venv/bin/immframe &
+# Start the slideshow; pipe output to the journal under tag 'immframe' so
+# you can read live logs with:    journalctl -t immframe -f
+~/immframe/.venv/bin/immframe 2>&1 | systemd-cat -t immframe &

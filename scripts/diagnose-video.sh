@@ -199,8 +199,14 @@ else
             HIT=1
             ok "video reached — capturing journal"
             sleep 5
-            echo "--- journalctl --user -u immframe -n 60 ---"
-            journalctl --user -u immframe -n 60 --no-pager | tail -60 | sed 's/^/    /'
+            echo "--- immframe logs (60 lines) ---"
+            # immframe may be launched via the user systemd unit OR via
+            # labwc autostart piped to systemd-cat (-t immframe). Try both
+            # sources and concatenate whatever produces output.
+            {
+                journalctl --user -u immframe -n 60 --no-pager 2>/dev/null
+                journalctl -t immframe -n 60 --no-pager 2>/dev/null
+            } | tail -60 | sed 's/^/    /'
             break
         fi
     done
