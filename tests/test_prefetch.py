@@ -61,10 +61,37 @@ def test_images_get_downloaded_and_queued():
         w.stop(timeout=2.0)
 
 
-def test_videos_pass_through_with_none_path():
+def test_videos_get_poster_jpeg_downloaded():
+    """Video assets now fetch a poster JPEG via the same /thumbnail endpoint
+    so the controller can render a matted still before MPV takes over."""
     selector = MagicMock()
     selector.next_batch.side_effect = [[_a("v", AssetKind.VIDEO)], []]
     client = _client_writing_bytes()
+    w = PrefetchWorker(selector, client, queue_size=5, empty_backoff_s=0.01)
+    w.start()
+    try:
+        item = w.next(timeout=2.0)
+        assert item is not None
+        path, asset = item
+        assert asset.id == "v"
+        assert path is not None
+        # Poster file actually exists on disk (download succeeded)
+        assert path.read_bytes() == b"img-v"
+    finally:
+        w.stop(timeout=2.0)
+    client.download_preview.assert_called_once()
+
+
+def test_video_poster_download_failure_falls_back_to_none():
+    """If poster download fails the video still goes through — the
+    controller will play it without a matted still."""
+    from immframe.immich.client import ImmichError
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("v", AssetKind.VIDEO)], []]
+
+    client = MagicMock()
+    client.download_preview.side_effect = ImmichError("upstream 500")
+
     w = PrefetchWorker(selector, client, queue_size=5, empty_backoff_s=0.01)
     w.start()
     try:
@@ -76,7 +103,6 @@ def test_videos_pass_through_with_none_path():
     path, asset = item
     assert path is None
     assert asset.id == "v"
-    client.download_preview.assert_not_called()
 
 
 def test_drain_removes_pending_files():

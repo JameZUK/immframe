@@ -175,3 +175,73 @@ control:
     cfg = Config.load(cfg_yaml)
     assert cfg.control.http.username == "admin"
     assert cfg.control.http.password == "hunter2"
+
+
+def test_video_rotate_valid_values(tmp_path: Path):
+    """auto / no / 0 / 90 / 180 / 270 must all be accepted."""
+    for v in ("auto", "no", "0", "90", "180", "270"):
+        cfg_yaml = _write(
+            tmp_path,
+            f"config-{v}.yaml",
+            f"""
+immich:
+  url: https://immich.example
+  api_key: k
+video:
+  rotate: {v}
+""",
+        )
+        cfg = Config.load(cfg_yaml)
+        assert cfg.video.rotate == v
+
+
+def test_video_rotate_rejects_bad_value(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+video:
+  rotate: 45
+""",
+    )
+    with pytest.raises(ValueError, match="video.rotate"):
+        Config.load(cfg_yaml)
+
+
+def test_video_poster_defaults(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.video.poster is True
+    assert cfg.video.poster_hold_s == 3.0
+    assert cfg.video.rotate == "auto"
+
+
+def test_video_poster_overrides(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+video:
+  poster: false
+  poster_hold_s: 0.5
+  rotate: "180"
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.video.poster is False
+    assert cfg.video.poster_hold_s == 0.5
+    assert cfg.video.rotate == "180"

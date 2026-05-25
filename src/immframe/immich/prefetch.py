@@ -149,7 +149,20 @@ class PrefetchWorker:
                 return None
             return (dest, asset)
         if asset.kind == AssetKind.VIDEO:
-            return (None, asset)                        # streamed by MPV
+            # Also fetch a still poster JPEG for videos — the controller
+            # renders it via pi3d (matted, faded-in) before MPV takes over
+            # for playback. If the poster download fails we still play the
+            # video, just without the matted pre-roll.
+            dest = self._tmp_dir / f"{asset.id}.poster.jpg"
+            try:
+                self._client.download_preview(asset.id, dest)
+                return (dest, asset)
+            except ImmichError as e:
+                log.warning(
+                    "video poster download(%s) failed: %s — playing without poster",
+                    asset.id, e,
+                )
+                return (None, asset)
         return None                                     # OTHER/AUDIO: skip
 
     def _enqueue(self, item: QueueItem) -> bool:

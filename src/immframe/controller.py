@@ -246,6 +246,7 @@ class Controller:
                 self._video_player = VideoPlayer(
                     mute=self._config.video.mute,
                     vo=self._config.video.vo,
+                    rotate=self._config.video.rotate,
                 )
             except Exception as e:
                 log.warning(
@@ -318,15 +319,31 @@ class Controller:
 
                 new_path, asset = item
 
-                if asset.kind == AssetKind.VIDEO and self._video_player is not None:
+                is_video = asset.kind == AssetKind.VIDEO
+                can_play_video = self._video_player is not None and self._config.video.enabled
+                show_poster = (
+                    is_video and new_path is not None
+                    and self._config.video.poster
+                )
+
+                # Video with no playback ability → drop the poster, skip.
+                if is_video and not can_play_video:
+                    if new_path is not None:
+                        new_path.unlink(missing_ok=True)
+                    continue
+
+                # Video with no poster (download failed or poster disabled):
+                # play directly via MPV, no pi3d render.
+                if is_video and not show_poster:
                     self._play_video(asset)
                     next_tm = time.time() + time_delay
                     continue
 
+                # Non-video with no path shouldn't happen, but guard against it.
                 if new_path is None:
-                    # Video but no player — skip.
                     continue
 
+                # --- Standard render path (image / live photo / video poster) ---
                 self._current_asset = asset
                 self._publish_state()
 
@@ -349,10 +366,13 @@ class Controller:
                     current_path.unlink(missing_ok=True)
                 current_path = new_path
 
-                # Apple Live Photos: image asset with a paired motion clip
-                # — play the motion clip after the still has been visible.
+                # Motion clip after the still:
+                #   - live photo (image + paired motion video):   _play_live_photo
+                #   - video asset displayed as poster:             _play_video_after_poster
                 if asset.live_photo_video_id:
                     self._play_live_photo(asset)
+                elif is_video:
+                    self._play_video_after_poster(asset)
 
                 next_tm = time.time() + time_delay
                 if not loop_running:
@@ -415,6 +435,18 @@ class Controller:
         url, headers = self._client.video_play_args(asset.live_photo_video_id)
         log.info("live photo: asset=%s motion=%s", asset.id, asset.live_photo_video_id)
         self._play_video_url(url, headers)
+
+    def _play_video_after_poster(self, asset: Asset) -> None:
+        """For a VIDEO asset rendered as a matted poster first, hold the
+        still for `video.poster_hold_s` then play the video through MPV."""
+        if self._video_player is None or not self._config.video.enabled:
+            return
+        hold = max(0.0, self._config.video.poster_hold_s)
+        if hold > 0:
+            self._stop_evt.wait(hold)
+            if self._stop_evt.is_set():
+                return
+        self._play_video(asset)
 
     def stop(self) -> None:
         self._stop_evt.set()

@@ -120,6 +120,12 @@ selection:
 | `enabled` | bool | `true` | Whether videos are included in selection batches. When `false`, videos are skipped at the prefetch layer. |
 | `stream` | bool | `true` | When `true`, videos play straight from the Immich URL via MPV (no local file). When `false`, videos would be downloaded first — Phase-1 immframe only implements the streaming path. |
 | `mute` | bool | `true` | MPV `mute` option. |
+| `vo` | enum | `gpu` | MPV video output backend. `gpu` (the default — KMS/DRM on Pi, X11 GL elsewhere), `x11`, `drm`, or `sdl`. |
+| `poster` | bool | `true` | When `true`, render the video's matted preview JPEG via pi3d first (same fade/blur/mat treatment as images), then hand off to MPV. When `false`, videos go straight to MPV fullscreen with no frame. |
+| `poster_hold_s` | float | `3.0` | Seconds to hold the matted poster before MPV starts. |
+| `live_photo_hold_s` | float | `1.0` | Seconds to hold the still before playing a Live Photo's motion clip. |
+| `rotate` | enum | `auto` | Override MPV's video rotation: `auto` (honor container rotation tag — the default), `no` (disable rotation entirely), or `0`/`90`/`180`/`270` to force a clockwise rotation. Phone-shot portrait videos rotate correctly under `auto` because their container metadata carries the rotation. |
+| `max_play_s` | float | `60.0` | Hard cap per video in seconds. Slideshow advances even if MPV hasn't reported EOF (bad codec, network stall, etc.). |
 
 ```yaml
 video:

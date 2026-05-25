@@ -109,6 +109,20 @@ class VideoConfig:
     pause_pi3d_during_playback: bool = True
     # How long to hold the still before triggering live-photo motion clip
     live_photo_hold_s: float = 1.0
+    # Show the (matted) preview JPEG of a video before playing it. When
+    # true: video assets render through pi3d first like images, giving
+    # them the mat / blur-edges / fade-in treatment, then MPV takes over
+    # for playback. When false: videos go straight to MPV fullscreen.
+    poster: bool = True
+    # Seconds to hold the matted poster before MPV starts. Independent of
+    # live_photo_hold_s since videos are longer-form content and benefit
+    # from a longer pre-roll.
+    poster_hold_s: float = 3.0
+    # MPV --video-rotate option:
+    #   "auto"  — honor rotation tag in container metadata (default)
+    #   "0"/"90"/"180"/"270" — force a specific clockwise rotation
+    #   "no"    — disable rotation entirely
+    rotate: str = "auto"
     # Hard cap for any single video play (seconds) — slideshow advances
     # even if MPV hasn't reported EOF (bad codec, network stall, ...)
     max_play_s: float = 60.0
@@ -233,6 +247,14 @@ class Config:
             )
 
         vid_raw = data.get("video", {})
+        # YAML 1.1 boolification: unquoted `no`/`yes` parse to False/True.
+        # We want `rotate: no` to mean "disable rotation" (string "no"), so
+        # convert booleans back to their string equivalents here.
+        rotate_raw = vid_raw.get("rotate", "auto")
+        if isinstance(rotate_raw, bool):
+            rotate_raw = "no" if not rotate_raw else "auto"
+        else:
+            rotate_raw = str(rotate_raw)
         video = VideoConfig(
             enabled=bool(vid_raw.get("enabled", True)),
             stream=bool(vid_raw.get("stream", True)),
@@ -240,8 +262,17 @@ class Config:
             vo=vid_raw.get("vo", "gpu"),
             pause_pi3d_during_playback=bool(vid_raw.get("pause_pi3d_during_playback", True)),
             live_photo_hold_s=float(vid_raw.get("live_photo_hold_s", 1.0)),
+            poster=bool(vid_raw.get("poster", True)),
+            poster_hold_s=float(vid_raw.get("poster_hold_s", 3.0)),
+            rotate=rotate_raw,
             max_play_s=float(vid_raw.get("max_play_s", 60.0)),
         )
+        # rotate validation
+        valid_rot = ("auto", "no", "0", "90", "180", "270")
+        if video.rotate not in valid_rot:
+            raise ValueError(
+                f"video.rotate must be one of {valid_rot}; got {video.rotate!r}"
+            )
 
         viewer = ViewerConfig(raw=dict(data.get("viewer", {})))
 

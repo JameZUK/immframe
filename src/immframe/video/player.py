@@ -33,6 +33,7 @@ class VideoPlayer:
         mute: bool = True,
         fit: Literal["contain", "cover"] = "contain",
         vo: VideoOutput | str = "gpu",
+        rotate: str = "auto",
     ) -> None:
         # Imported lazily so the module imports cleanly on dev hosts without libmpv.
         import mpv
@@ -42,7 +43,11 @@ class VideoPlayer:
         self._on_end: Callable[[], None] | None = None
         self._on_first_frame: Callable[[], None] | None = None
 
-        self._mpv = mpv.MPV(
+        # python-mpv constructor kwargs map underscore→dash, so `video_rotate`
+        # below becomes MPV's --video-rotate option. "auto" is MPV's own
+        # default (honor container rotation); we just skip setting the
+        # option in that case.
+        mpv_opts: dict = dict(
             vo=vo,
             mute=mute,
             keep_open="no",
@@ -55,6 +60,9 @@ class VideoPlayer:
             input_vo_keyboard=False,
             log_handler=self._mpv_log,
         )
+        if rotate != "auto":
+            mpv_opts["video_rotate"] = rotate
+        self._mpv = mpv.MPV(**mpv_opts)
 
         # Diagnostics: log what MPV reports so video issues are debuggable
         # from the systemd journal alone.
