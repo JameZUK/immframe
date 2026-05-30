@@ -121,6 +121,7 @@ selection:
 | `stream` | bool | `true` | When `true`, videos play straight from the Immich URL via MPV (no local file). When `false`, videos would be downloaded first — Phase-1 immframe only implements the streaming path. |
 | `mute` | bool | `true` | MPV `mute` option. |
 | `vo` | enum | `gpu` | MPV video output backend. `gpu` (the default — KMS/DRM on Pi, X11 GL elsewhere), `x11`, `drm`, or `sdl`. |
+| `fit` | enum | `contain` | How video fits the screen. `contain` preserves aspect ratio and letterboxes/pillarboxes the gaps (no cropping). `cover` preserves aspect ratio but fills the whole screen, cropping the overflow — good for edge-to-edge playback on a 16:9 panel at the cost of clipping the edges. |
 | `poster` | bool | `true` | When `true`, render the video's matted preview JPEG via pi3d first (same fade/blur/mat treatment as images), then hand off to MPV. When `false`, videos go straight to MPV fullscreen with no frame. |
 | `poster_hold_s` | float | `3.0` | Seconds to hold the matted poster before MPV starts. |
 | `live_photo_hold_s` | float | `1.0` | Seconds to hold the still before playing a Live Photo's motion clip. |

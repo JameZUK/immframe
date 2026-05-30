@@ -104,9 +104,10 @@ class VideoConfig:
     #   "drm"   — direct framebuffer (KMS, no X server)
     #   "sdl"   — SDL2 (works inside pi3d's window in some setups)
     vo: str = "gpu"
-    # If `true`, MPV pauses playback during pi3d teardown — useful when
-    # MPV and pi3d fight for the framebuffer on KMS-only setups.
-    pause_pi3d_during_playback: bool = True
+    # How MPV fits the video into the window:
+    #   "contain" — preserve aspect, letterbox/pillarbox as needed (default)
+    #   "cover"   — preserve aspect, fill the screen, crop the overflow
+    fit: str = "contain"
     # How long to hold the still before triggering live-photo motion clip
     live_photo_hold_s: float = 1.0
     # Show the (matted) preview JPEG of a video before playing it. When
@@ -265,7 +266,7 @@ class Config:
             stream=bool(vid_raw.get("stream", True)),
             mute=bool(vid_raw.get("mute", True)),
             vo=vid_raw.get("vo", "gpu"),
-            pause_pi3d_during_playback=bool(vid_raw.get("pause_pi3d_during_playback", True)),
+            fit=str(vid_raw.get("fit", "contain")),
             live_photo_hold_s=float(vid_raw.get("live_photo_hold_s", 1.0)),
             poster=bool(vid_raw.get("poster", True)),
             poster_hold_s=float(vid_raw.get("poster_hold_s", 3.0)),
@@ -278,6 +279,10 @@ class Config:
         if video.rotate not in valid_rot:
             raise ValueError(
                 f"video.rotate must be one of {valid_rot}; got {video.rotate!r}"
+            )
+        if video.fit not in ("contain", "cover"):
+            raise ValueError(
+                f"video.fit must be 'contain' or 'cover'; got {video.fit!r}"
             )
 
         viewer = ViewerConfig(raw=dict(data.get("viewer", {})))

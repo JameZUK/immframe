@@ -246,6 +246,7 @@ class Controller:
                 self._video_player = VideoPlayer(
                     mute=self._config.video.mute,
                     vo=self._config.video.vo,
+                    fit=self._config.video.fit,
                     rotate=self._config.video.rotate,
                     fullscreen=self._config.video.fullscreen,
                 )

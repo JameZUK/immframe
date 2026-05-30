@@ -211,6 +211,52 @@ video:
         Config.load(cfg_yaml)
 
 
+def test_video_fit_defaults_contain(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.video.fit == "contain"
+
+
+def test_video_fit_cover(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+video:
+  fit: cover
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.video.fit == "cover"
+
+
+def test_video_fit_rejects_bad_value(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+video:
+  fit: stretch
+""",
+    )
+    with pytest.raises(ValueError, match="video.fit"):
+        Config.load(cfg_yaml)
+
+
 def test_video_fullscreen_defaults_off(tmp_path: Path):
     """Default is off so the compositor (labwc) owns fullscreen — a second
     fullscreen request from MPV gets toggled back to a tiny window."""
