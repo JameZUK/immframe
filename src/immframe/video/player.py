@@ -34,6 +34,7 @@ class VideoPlayer:
         fit: Literal["contain", "cover"] = "contain",
         vo: VideoOutput | str = "gpu",
         rotate: str = "auto",
+        fullscreen: bool = False,
     ) -> None:
         # Imported lazily so the module imports cleanly on dev hosts without libmpv.
         import mpv
@@ -47,6 +48,15 @@ class VideoPlayer:
         # below becomes MPV's --video-rotate option. "auto" is MPV's own
         # default (honor container rotation); we just skip setting the
         # option in that case.
+        # `fullscreen` defaults to OFF. On the supported labwc kiosk the
+        # compositor is configured to fullscreen every window it sees (see
+        # examples/labwc/rc.xml). If MPV *also* requests fullscreen, the
+        # compositor's ToggleFullscreen rule fires on an already-fullscreen
+        # window and toggles it back to a small default-size window — the
+        # "tiny video" symptom. Letting the compositor own fullscreen keeps
+        # MPV and the pi3d window symmetric (both map windowed, both get
+        # toggled to fullscreen). Set true only when running MPV under a
+        # compositor that does NOT auto-fullscreen (a plain desktop / X11).
         mpv_opts: dict = dict(
             vo=vo,
             mute=mute,
@@ -54,7 +64,7 @@ class VideoPlayer:
             video_unscaled="no",
             keepaspect="yes",
             panscan="1.0" if fit == "cover" else "0.0",
-            fullscreen="yes",
+            fullscreen="yes" if fullscreen else "no",
             osc=False,
             input_default_bindings=False,
             input_vo_keyboard=False,

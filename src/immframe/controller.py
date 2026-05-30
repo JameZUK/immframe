@@ -247,6 +247,7 @@ class Controller:
                     mute=self._config.video.mute,
                     vo=self._config.video.vo,
                     rotate=self._config.video.rotate,
+                    fullscreen=self._config.video.fullscreen,
                 )
             except Exception as e:
                 log.warning(

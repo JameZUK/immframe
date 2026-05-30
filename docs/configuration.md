@@ -125,6 +125,7 @@ selection:
 | `poster_hold_s` | float | `3.0` | Seconds to hold the matted poster before MPV starts. |
 | `live_photo_hold_s` | float | `1.0` | Seconds to hold the still before playing a Live Photo's motion clip. |
 | `rotate` | enum | `auto` | Override MPV's video rotation: `auto` (honor container rotation tag — the default), `no` (disable rotation entirely), or `0`/`90`/`180`/`270` to force a clockwise rotation. Phone-shot portrait videos rotate correctly under `auto` because their container metadata carries the rotation. |
+| `fullscreen` | bool | `false` | Whether MPV requests its own fullscreen. **Leave `false` on the labwc kiosk** — the compositor is configured to fullscreen every window, and a *second* fullscreen request from MPV makes labwc's `ToggleFullscreen` rule toggle it back to a tiny default-size window (the "video plays in a small window" symptom). Set `true` only when running MPV under a compositor that does **not** auto-fullscreen windows (e.g. a regular desktop or X11 session). |
 | `max_play_s` | float | `60.0` | Hard cap per video in seconds. Slideshow advances even if MPV hasn't reported EOF (bad codec, network stall, etc.). |
 
 ```yaml

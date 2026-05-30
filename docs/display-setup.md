@@ -186,6 +186,15 @@ fine on a kiosk that only ever runs one or two apps. If you'd rather
 target only immframe / MPV specifically, replace `"*"` with the actual
 identifier shown by `swaymsg -t get_tree` or labwc's debug output.)
 
+> **Important — leave `video.fullscreen: false` (the default).** Because
+> this rule fullscreens *every* window, MPV must **not** also request
+> fullscreen. If it does, the rule toggles MPV's already-fullscreen window
+> back to a tiny default-size one — videos then play in a small box in the
+> corner while the slideshow stays fullscreen. immframe ships with
+> `video.fullscreen: false` so the compositor owns fullscreen for both the
+> pi3d window and MPV. Only set `video.fullscreen: true` if you run immframe
+> under a compositor that does *not* auto-fullscreen windows.
+
 Reboot. You should see the slideshow appear within a few seconds of
 the TTY login.
 

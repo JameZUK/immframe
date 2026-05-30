@@ -34,6 +34,7 @@ video:
   poster: true                             # render matted still poster before videos
   poster_hold_s: 3.0                       # seconds to hold the poster before MPV starts
   rotate: auto                             # auto | no | 0 | 90 | 180 | 270 (override container rotation)
+  fullscreen: false                        # let the compositor fullscreen MPV (true only on non-kiosk desktops)
   max_play_s: 60.0                         # hard cap per video play (sec)
 
 viewer:

@@ -211,6 +211,38 @@ video:
         Config.load(cfg_yaml)
 
 
+def test_video_fullscreen_defaults_off(tmp_path: Path):
+    """Default is off so the compositor (labwc) owns fullscreen — a second
+    fullscreen request from MPV gets toggled back to a tiny window."""
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.video.fullscreen is False
+
+
+def test_video_fullscreen_override(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+video:
+  fullscreen: true
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.video.fullscreen is True
+
+
 def test_video_poster_defaults(tmp_path: Path):
     cfg_yaml = _write(
         tmp_path,

@@ -123,6 +123,11 @@ class VideoConfig:
     #   "0"/"90"/"180"/"270" — force a specific clockwise rotation
     #   "no"    — disable rotation entirely
     rotate: str = "auto"
+    # Whether MPV requests its own fullscreen. Default false: on the labwc
+    # kiosk the compositor fullscreens every window, and a second fullscreen
+    # request from MPV gets toggled back to a tiny window. Set true only when
+    # running under a compositor that does NOT auto-fullscreen (plain desktop).
+    fullscreen: bool = False
     # Hard cap for any single video play (seconds) — slideshow advances
     # even if MPV hasn't reported EOF (bad codec, network stall, ...)
     max_play_s: float = 60.0
@@ -265,6 +270,7 @@ class Config:
             poster=bool(vid_raw.get("poster", True)),
             poster_hold_s=float(vid_raw.get("poster_hold_s", 3.0)),
             rotate=rotate_raw,
+            fullscreen=bool(vid_raw.get("fullscreen", False)),
             max_play_s=float(vid_raw.get("max_play_s", 60.0)),
         )
         # rotate validation
