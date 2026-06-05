@@ -57,12 +57,23 @@ class VideoPlayer:
         # MPV and the pi3d window symmetric (both map windowed, both get
         # toggled to fullscreen). Set true only when running MPV under a
         # compositor that does NOT auto-fullscreen (a plain desktop / X11).
+        # `auto_window_resize=no` is critical on the labwc kiosk. This is ONE
+        # persistent MPV instance reused across every video via `loadfile …
+        # replace`. With MPV's default (auto-window-resize=yes), each new file
+        # makes MPV resize its window to that video's native resolution. The
+        # first video's window gets fullscreened by labwc's ToggleFullscreen
+        # rule (which fires once, on map), but a later per-file resize drops
+        # the window out of fullscreen — and labwc never re-toggles an
+        # existing window, so that video (and any after it that resize) play
+        # small. Pinning the window size off means the compositor-owned
+        # fullscreen geometry sticks for the lifetime of the instance.
         mpv_opts: dict = dict(
             vo=vo,
             mute=mute,
             keep_open="no",
             video_unscaled="no",
             keepaspect="yes",
+            auto_window_resize="no",
             panscan="1.0" if fit == "cover" else "0.0",
             fullscreen="yes" if fullscreen else "no",
             osc=False,
