@@ -205,6 +205,42 @@ def test_collage_label_uses_scene_when_present():
     assert c._collage_label(3) == "beach • 3 photos"
 
 
+def test_collage_enabled_toggle_pushes_config_to_prefetch():
+    c = _controller()
+    c.collage_enabled = True
+    assert c.collage_enabled is True
+    arg = c._prefetch.set_collage.call_args.args[0]
+    assert arg is not None and arg.enabled is True
+
+
+def test_collage_disabled_passes_none_to_prefetch():
+    c = _controller()
+    c.collage_enabled = True
+    c._prefetch.set_collage.reset_mock()
+    c.collage_enabled = False
+    assert c._prefetch.set_collage.call_args.args[0] is None
+
+
+def test_collage_layout_validates():
+    c = _controller()
+    with pytest.raises(ValueError):
+        c.collage_layout = "spiral"
+    c.collage_layout = "grid"
+    assert c.collage_layout == "grid"
+
+
+def test_collage_tiles_clamp_and_keep_min_le_max():
+    c = _controller()
+    c.collage_min_tiles = 100               # clamps to 12
+    assert c.collage_min_tiles == 12
+    assert c.collage_max_tiles == 12        # max raised to preserve min <= max
+    c.collage_max_tiles = 3                 # below min → min lowered to match
+    assert c.collage_max_tiles == 3
+    assert c.collage_min_tiles == 3
+    c.collage_min_tiles = 0                 # clamps up to 2
+    assert c.collage_min_tiles == 2
+
+
 def test_current_scene_delegates_to_scene_selector():
     c = _controller()
     c.selection_mode = "scene"

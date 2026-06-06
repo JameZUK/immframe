@@ -181,6 +181,36 @@ collage:
   fit: cover
 ```
 
+### Controlling collage at runtime
+
+`enabled`, `layout`, `min_tiles` and `max_tiles` are also exposed over the
+control plane, so you can flip collage on/off and retune it without editing the
+config or restarting (`gap`, `background` and `fit` stay config-only). Changing
+any of them drains the prefetch queue and refreshes immediately. Tile counts are
+clamped to 2–12 and the worker keeps `min ≤ max` automatically.
+
+**HTTP** (see [control.http](#controlhttp)):
+
+| Method / path | Body | Effect |
+|---|---|---|
+| `POST /api/collage_enabled` | `{"value": true}` | Turn collage on/off |
+| `POST /api/collage_layout` | `{"value": "golden_ratio"}` | `auto` \| `grid` \| `golden_ratio` |
+| `POST /api/collage_min_tiles` | `{"value": 4}` | Lower tile bound (2–12) |
+| `POST /api/collage_max_tiles` | `{"value": 8}` | Upper tile bound (2–12) |
+| `GET /api/state` | — | Includes a `"collage"` block with the current values |
+
+**CLI** (thin client over the HTTP API):
+
+```bash
+immframe collage on                  # or: off
+immframe collage-layout golden_ratio
+immframe collage-tiles 4 8           # min max
+```
+
+**MQTT / Home Assistant** — collage adds a *Collage* switch, a *Collage layout*
+select, and *Collage min/max tiles* number entities, all auto-discovered. See
+[home-assistant.md](./home-assistant.md).
+
 ---
 
 ## viewer

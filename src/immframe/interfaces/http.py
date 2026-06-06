@@ -22,6 +22,10 @@ Endpoints:
     POST /api/album_ids              {"value": ["uuid", ...]}
     POST /api/smart_query            {"value": "..."}
     POST /api/next                   force-advance
+    POST /api/collage_enabled        {"value": bool}
+    POST /api/collage_layout         {"value": "auto"|"grid"|"golden_ratio"}
+    POST /api/collage_min_tiles      {"value": int 2..12}
+    POST /api/collage_max_tiles      {"value": int 2..12}
     GET  /api/image/<asset_id>       proxy preview JPEG from Immich
 
 All control endpoints require Basic auth when `config.control.http.auth=true`.
@@ -60,6 +64,7 @@ _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
 _SELECTION_MODES = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
+_COLLAGE_LAYOUTS = ("auto", "grid", "golden_ratio")
 # Re-export the canonical list from the controller so additions land in one place.
 _SHOW_TEXT_KEYS = SHOW_TEXT_KEYS
 
@@ -87,6 +92,10 @@ _POST_PATHS = frozenset({
     "/api/show_clock",
     "/api/time_delay",
     "/api/fade_time",
+    "/api/collage_enabled",
+    "/api/collage_layout",
+    "/api/collage_min_tiles",
+    "/api/collage_max_tiles",
 })
 
 
@@ -360,6 +369,27 @@ class _Handler(BaseHTTPRequestHandler):
             value = self._require_number(0.0, 30.0)
             self._ctrl.fade_time = value
             return self._state()
+        if path == "/api/collage_enabled":
+            value = self._require_value(bool)
+            self._ctrl.collage_enabled = value
+            return self._state()
+        if path == "/api/collage_layout":
+            value = self._require_value(str)
+            if value not in _COLLAGE_LAYOUTS:
+                raise _HttpError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"collage_layout must be one of {_COLLAGE_LAYOUTS}",
+                )
+            self._ctrl.collage_layout = value
+            return self._state()
+        if path == "/api/collage_min_tiles":
+            value = self._require_number(2, 12)
+            self._ctrl.collage_min_tiles = int(value)
+            return self._state()
+        if path == "/api/collage_max_tiles":
+            value = self._require_number(2, 12)
+            self._ctrl.collage_max_tiles = int(value)
+            return self._state()
         # GET-only paths
         if path in {"/api/version", "/api/state", "/healthz"}:
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "GET only")
@@ -403,6 +433,12 @@ class _Handler(BaseHTTPRequestHandler):
             "show_clock": c.show_clock,
             "time_delay": c.time_delay,
             "fade_time": c.fade_time,
+            "collage": {
+                "enabled": c.collage_enabled,
+                "layout": c.collage_layout,
+                "min_tiles": c.collage_min_tiles,
+                "max_tiles": c.collage_max_tiles,
+            },
             "current_asset": asset_obj,
         })
 

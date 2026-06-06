@@ -18,6 +18,7 @@ import logging
 import signal
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from .config import Config, SelectionMode
@@ -154,6 +155,10 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
+def _iclamp(value: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, value))
+
+
 def _check_display_environment(*, video_enabled: bool) -> None:
     """Warn loudly if the user is on bare TTY/KMS with video enabled.
 
@@ -212,6 +217,11 @@ class Controller:
             image_size=config.immich.image_size,
         )
 
+        # Mutable collage shadow state — seeded from config, tunable at runtime
+        # via the control plane. Pushed to the prefetch worker as a fresh copy
+        # on every change (see _apply_collage / PrefetchWorker.set_collage).
+        self._collage = replace(config.collage)
+
         # Build initial selector
         self._selector: AssetSelector = self._build_selector(self._selection_mode)
         self._prefetch = PrefetchWorker(
@@ -225,7 +235,7 @@ class Controller:
             # When collage is on, the worker emits one composited image per
             # item (instead of one asset); it flows through the render path
             # unchanged. Label reflects the active selection + tile count.
-            collage=config.collage if config.collage.enabled else None,
+            collage=replace(self._collage) if self._collage.enabled else None,
             collage_label=self._collage_label,
         )
 
@@ -272,10 +282,10 @@ class Controller:
             log.warning("Immich ping failed at startup; will retry on first prefetch.")
 
         # Composite collages at the real display resolution now pi3d knows it.
-        if self._config.collage.enabled:
-            self._prefetch.set_collage_canvas(
-                self._viewer.display_width, self._viewer.display_height
-            )
+        # Set unconditionally so a later runtime enable uses the right canvas.
+        self._prefetch.set_collage_canvas(
+            self._viewer.display_width, self._viewer.display_height
+        )
 
         self._prefetch.start()
 
@@ -686,6 +696,64 @@ class Controller:
         scene = self.current_scene
         base = scene if scene else self._selection_mode.capitalize()
         return f"{base} • {n} photo{'s' if n != 1 else ''}"
+
+    # ── Collage (runtime-tunable) ────────────────────────────────────────
+    def _apply_collage(self) -> None:
+        """Push the current collage shadow state to the prefetch worker (as a
+        fresh copy) and force a refresh so the change shows promptly."""
+        if self._prefetch is not None:
+            self._prefetch.set_collage(
+                replace(self._collage) if self._collage.enabled else None
+            )
+        self._force_next_evt.set()
+        self._publish_state()
+
+    @property
+    def collage_enabled(self) -> bool:
+        return self._collage.enabled
+
+    @collage_enabled.setter
+    def collage_enabled(self, value: bool) -> None:
+        self._collage.enabled = bool(value)
+        self._apply_collage()
+
+    @property
+    def collage_layout(self) -> str:
+        return self._collage.layout
+
+    @collage_layout.setter
+    def collage_layout(self, value: str) -> None:
+        v = str(value)
+        if v not in ("auto", "grid", "golden_ratio"):
+            raise ValueError(
+                f"collage_layout must be 'auto', 'grid' or 'golden_ratio'; got {v!r}"
+            )
+        self._collage.layout = v
+        self._apply_collage()
+
+    @property
+    def collage_min_tiles(self) -> int:
+        return self._collage.min_tiles
+
+    @collage_min_tiles.setter
+    def collage_min_tiles(self, value: int) -> None:
+        v = _iclamp(int(value), 2, 12)
+        self._collage.min_tiles = v
+        if self._collage.max_tiles < v:                 # keep min <= max
+            self._collage.max_tiles = v
+        self._apply_collage()
+
+    @property
+    def collage_max_tiles(self) -> int:
+        return self._collage.max_tiles
+
+    @collage_max_tiles.setter
+    def collage_max_tiles(self, value: int) -> None:
+        v = _iclamp(int(value), 2, 12)
+        self._collage.max_tiles = v
+        if self._collage.min_tiles > v:                 # keep min <= max
+            self._collage.min_tiles = v
+        self._apply_collage()
 
     # ── Internals ───────────────────────────────────────────────────────
     def _sync_to_viewer(self) -> None:

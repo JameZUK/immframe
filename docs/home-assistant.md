@@ -23,7 +23,16 @@ HA, and a complete Lovelace card example.
 | `number.immframe_fade_time` | number (0–30 s) | Crossfade duration |
 | `text.immframe_show_text` | text | Overlay fields (comma-separated, subset of `title,caption,name,date,location,folder,people`) |
 | `switch.immframe_show_clock` | switch | Show / hide the clock overlay |
+| `switch.immframe_collage_enabled` | switch | Turn collage mode on/off |
+| `select.immframe_collage_layout` | select | `auto` / `grid` / `golden_ratio` |
+| `number.immframe_collage_min_tiles` | number (2–12) | Fewest photos per collage |
+| `number.immframe_collage_max_tiles` | number (2–12) | Most photos per collage |
 | `sensor.immframe_current_asset` | sensor | Current asset UUID; attributes carry file, taken_at, city, country, camera, kind, favorite, scene |
+
+For a collage, `sensor.immframe_current_asset` reports the synthetic label
+(e.g. `Random • 4 photos`) rather than a real asset ID. See
+[configuration.md → collage](./configuration.md#collage) for the file-level
+settings (`gap`, `background`, `fit`) that aren't exposed as entities.
 
 A device with these entities is created with the identifier set to your
 `control.mqtt.base_topic` (default `immframe`).

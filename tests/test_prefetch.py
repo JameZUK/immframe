@@ -278,6 +278,36 @@ def test_collage_skips_when_too_few_sources():
     assert item is None
 
 
+def test_set_collage_switches_modes_at_runtime():
+    """set_collage flips the worker between single-asset and collage output
+    live (the control-plane toggle path)."""
+    from immframe.config import CollageConfig
+    selector = MagicMock()
+    selector.next_batch.side_effect = lambda n: [_a(f"x{i}") for i in range(n)]
+    client = _client_writing_bytes()
+    w = PrefetchWorker(selector, client, queue_size=2, empty_backoff_s=0.01)
+    w.set_collage_canvas(120, 90)
+    w.start()
+    try:
+        item = w.next(timeout=2.0)
+        assert item is not None and not item[1].id.startswith("collage-")
+
+        w.set_collage(CollageConfig(enabled=True, min_tiles=2, max_tiles=2, layout="grid"))
+
+        # A stale single-asset item may slip through right after the drain;
+        # keep reading until a collage appears.
+        deadline = time.time() + 3.0
+        got_collage = False
+        while time.time() < deadline:
+            it = w.next(timeout=1.0)
+            if it is not None and it[1].id.startswith("collage-"):
+                got_collage = True
+                break
+        assert got_collage
+    finally:
+        w.stop(timeout=2.0)
+
+
 def test_stop_is_idempotent():
     selector = MagicMock()
     selector.next_batch.return_value = []

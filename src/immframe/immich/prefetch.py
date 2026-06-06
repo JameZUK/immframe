@@ -123,6 +123,15 @@ class PrefetchWorker:
             self._gen += 1
         self._drain_queue()
 
+    def set_collage(self, collage: "CollageConfig | None") -> None:
+        """Switch collage mode on/off (or change its settings) at runtime.
+        Pass a fresh CollageConfig (or None to disable). Drains the queue so a
+        mix of single-asset and collage items never surfaces."""
+        with self._selector_lock:
+            self._collage = collage
+            self._gen += 1
+        self._drain_queue()
+
     # ── Internals ───────────────────────────────────────────────────────
     def _drain_queue(self) -> None:
         while True:
@@ -133,21 +142,21 @@ class PrefetchWorker:
             if path is not None:
                 path.unlink(missing_ok=True)
 
-    def _snapshot(self) -> tuple[AssetSelector, int]:
+    def _snapshot(self) -> "tuple[AssetSelector, int, CollageConfig | None]":
         with self._selector_lock:
-            return self._selector, self._gen
+            return self._selector, self._gen, self._collage
 
     def _run(self) -> None:
         while not self._stop_evt.is_set():
-            selector, gen = self._snapshot()
+            selector, gen, collage = self._snapshot()
 
-            if self._collage is not None:
-                item = self._fetch_collage(selector)
+            if collage is not None:
+                item = self._fetch_collage(selector, collage)
                 if item is None:
                     self._stop_evt.wait(self._empty_backoff_s)
                     continue
-                _, gen_now = self._snapshot()
-                if gen_now != gen:                      # selector swapped mid-compose
+                _, gen_now, _ = self._snapshot()
+                if gen_now != gen:                      # selector/collage swapped mid-compose
                     self._discard(item)
                     continue
                 if not self._enqueue(item):
@@ -172,7 +181,7 @@ class PrefetchWorker:
                     continue
 
                 # Discard if selector was swapped while we were downloading.
-                _, gen_now = self._snapshot()
+                _, gen_now, _ = self._snapshot()
                 if gen_now != gen:
                     path = item[0]
                     if path is not None:
@@ -213,13 +222,14 @@ class PrefetchWorker:
         self._seq += 1
         return self._seq
 
-    def _fetch_collage(self, selector: AssetSelector) -> QueueItem | None:
+    def _fetch_collage(
+        self, selector: AssetSelector, cfg: "CollageConfig"
+    ) -> QueueItem | None:
         """Pull a random K assets, download each as a still, composite them
         into one JPEG, and return a single (path, synthetic_asset, None) item.
         Source stills are deleted once composited (only the collage is kept)."""
-        cfg = self._collage
-        assert cfg is not None
-        k = random.randint(cfg.min_tiles, cfg.max_tiles)
+        lo, hi = sorted((cfg.min_tiles, cfg.max_tiles))   # defensive vs torn ranges
+        k = random.randint(lo, hi)
         try:
             assets = selector.next_batch(k)
         except Exception as e:

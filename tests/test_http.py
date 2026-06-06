@@ -38,6 +38,10 @@ class _StubController:
         self.show_clock = False
         self.time_delay = 60.0
         self.fade_time = 4.0
+        self.collage_enabled = False
+        self.collage_layout = "auto"
+        self.collage_min_tiles = 3
+        self.collage_max_tiles = 6
         self.current_asset: Asset | None = None
         self.current_scene: str | None = None
         self.next_calls = 0
@@ -361,6 +365,64 @@ def test_post_fade_time():
                           timeout=2.0, auth=_auth())
         assert r.status_code == 200
         assert ctrl.fade_time == 1.5
+
+
+# ── Collage ──────────────────────────────────────────────────────────────────
+
+
+def test_state_includes_collage():
+    with _server() as (base, _, _):
+        body = requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()
+        assert body["collage"] == {
+            "enabled": False, "layout": "auto", "min_tiles": 3, "max_tiles": 6,
+        }
+
+
+def test_post_collage_enabled():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/collage_enabled", json={"value": True},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.collage_enabled is True
+        assert r.json()["collage"]["enabled"] is True
+
+
+def test_post_collage_layout():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/collage_layout", json={"value": "golden_ratio"},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.collage_layout == "golden_ratio"
+
+
+def test_post_collage_layout_validates_enum():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/collage_layout", json={"value": "spiral"},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+        assert ctrl.collage_layout == "auto"
+
+
+def test_post_collage_min_tiles():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/collage_min_tiles", json={"value": 4},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.collage_min_tiles == 4
+
+
+def test_post_collage_tiles_reject_out_of_range():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/collage_max_tiles", json={"value": 99},
+                          timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+        assert ctrl.collage_max_tiles == 6
+
+
+def test_collage_endpoint_requires_auth():
+    with _server() as (base, _, _):
+        r = requests.post(f"{base}/api/collage_enabled", json={"value": True}, timeout=2.0)
+        assert r.status_code == 401
 
 
 # ── Allow-listing / RCE prevention ─────────────────────────────────────────

@@ -35,6 +35,10 @@ class _StubController:
         self.show_clock = False
         self.time_delay = 60.0
         self.fade_time = 4.0
+        self.collage_enabled = False
+        self.collage_layout = "auto"
+        self.collage_min_tiles = 3
+        self.collage_max_tiles = 6
         self.current_asset: Asset | None = None
         self.current_scene: str | None = None
         self.next_calls = 0
@@ -160,6 +164,55 @@ def test_apply_cmd_next_button():
     e = next(e for e in ENTITIES if e.object_id == "next")
     _apply_cmd(c, e, "PRESS")
     assert c.next_calls == 1
+
+
+# ── Collage ──────────────────────────────────────────────────────────────────
+
+
+def test_collage_entities_present():
+    ids = {e.object_id for e in ENTITIES}
+    assert {"collage_enabled", "collage_layout", "collage_min_tiles",
+            "collage_max_tiles"} <= ids
+
+
+def test_state_of_collage():
+    c = _StubController()
+    c.collage_enabled = True
+    c.collage_layout = "grid"
+    c.collage_min_tiles = 4
+    c.collage_max_tiles = 8
+    by_id = {e.object_id: e for e in ENTITIES}
+    assert _state_of(c, by_id["collage_enabled"]) == "ON"
+    assert _state_of(c, by_id["collage_layout"]) == "grid"
+    assert _state_of(c, by_id["collage_min_tiles"]) == "4"
+    assert _state_of(c, by_id["collage_max_tiles"]) == "8"
+
+
+def test_apply_cmd_collage_enabled():
+    c = _StubController()
+    e = next(e for e in ENTITIES if e.object_id == "collage_enabled")
+    _apply_cmd(c, e, "ON")
+    assert c.collage_enabled is True
+    _apply_cmd(c, e, "OFF")
+    assert c.collage_enabled is False
+
+
+def test_apply_cmd_collage_layout():
+    c = _StubController()
+    e = next(e for e in ENTITIES if e.object_id == "collage_layout")
+    _apply_cmd(c, e, "golden_ratio")
+    assert c.collage_layout == "golden_ratio"
+
+
+def test_apply_cmd_collage_tiles_accepts_ha_float_payload():
+    """HA number entities send payloads like '5' or '5.0'."""
+    c = _StubController()
+    emin = next(e for e in ENTITIES if e.object_id == "collage_min_tiles")
+    emax = next(e for e in ENTITIES if e.object_id == "collage_max_tiles")
+    _apply_cmd(c, emin, "5.0")
+    _apply_cmd(c, emax, "9")
+    assert c.collage_min_tiles == 5
+    assert c.collage_max_tiles == 9
 
 
 # ── MqttInterface tests with mocked paho ────────────────────────────────────

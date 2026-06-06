@@ -89,6 +89,18 @@ def _build_parser() -> argparse.ArgumentParser:
     clock_p = sub.add_parser("clock", help="Show/hide the clock overlay")
     clock_p.add_argument("state", choices=("on", "off"))
 
+    collage_p = sub.add_parser("collage", help="Turn collage mode on or off")
+    collage_p.add_argument("state", choices=("on", "off"))
+
+    collage_layout_p = sub.add_parser("collage-layout", help="Set collage layout")
+    collage_layout_p.add_argument("layout", choices=("auto", "grid", "golden_ratio"))
+
+    collage_tiles_p = sub.add_parser(
+        "collage-tiles", help="Set collage tile range (min max, each 2-12)",
+    )
+    collage_tiles_p.add_argument("min", type=int)
+    collage_tiles_p.add_argument("max", type=int)
+
     random_p = sub.add_parser("random", help="Pull N random asset IDs from Immich (direct)")
     random_p.add_argument("count", type=int, nargs="?", default=5)
 
@@ -264,6 +276,16 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return 0
     if cmd == "clock":
         _post(session, f"{base}/api/show_clock", {"value": args.state == "on"})
+        return 0
+    if cmd == "collage":
+        _post(session, f"{base}/api/collage_enabled", {"value": args.state == "on"})
+        return 0
+    if cmd == "collage-layout":
+        _post(session, f"{base}/api/collage_layout", {"value": args.layout})
+        return 0
+    if cmd == "collage-tiles":
+        _post(session, f"{base}/api/collage_min_tiles", {"value": args.min})
+        _post(session, f"{base}/api/collage_max_tiles", {"value": args.max})
         return 0
 
     raise _CliError(f"unknown command: {cmd}")

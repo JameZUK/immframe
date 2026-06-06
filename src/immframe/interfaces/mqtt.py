@@ -93,6 +93,21 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("text", "show_text", "Overlay fields", icon="mdi:format-text"),
     Entity("switch", "show_clock", "Clock", icon="mdi:clock-outline"),
 
+    # Collage
+    Entity("switch", "collage_enabled", "Collage", icon="mdi:view-grid-plus"),
+    Entity(
+        "select", "collage_layout", "Collage layout",
+        options=("auto", "grid", "golden_ratio"), icon="mdi:view-dashboard",
+    ),
+    Entity(
+        "number", "collage_min_tiles", "Collage min tiles", icon="mdi:numeric",
+        min=2.0, max=12.0, step=1.0,
+    ),
+    Entity(
+        "number", "collage_max_tiles", "Collage max tiles", icon="mdi:numeric",
+        min=2.0, max=12.0, step=1.0,
+    ),
+
     # Read-only
     Entity(
         "sensor", "current_asset", "Current asset", icon="mdi:image",
@@ -126,6 +141,14 @@ def _state_of(controller: "Controller", entity: Entity) -> str:
         return ", ".join(controller.show_text)
     if oid == "show_clock":
         return "ON" if controller.show_clock else "OFF"
+    if oid == "collage_enabled":
+        return "ON" if controller.collage_enabled else "OFF"
+    if oid == "collage_layout":
+        return controller.collage_layout
+    if oid == "collage_min_tiles":
+        return str(controller.collage_min_tiles)
+    if oid == "collage_max_tiles":
+        return str(controller.collage_max_tiles)
     if oid == "current_asset":
         a = controller.current_asset
         return a.id if a is not None else ""
@@ -181,6 +204,14 @@ def _apply_cmd(controller: "Controller", entity: Entity, payload: str) -> None:
         controller.show_text = [t.strip() for t in s.split(",") if t.strip()]
     elif oid == "show_clock":
         controller.show_clock = (s.upper() == entity.payload_on)
+    elif oid == "collage_enabled":
+        controller.collage_enabled = (s.upper() == entity.payload_on)
+    elif oid == "collage_layout":
+        controller.collage_layout = s
+    elif oid == "collage_min_tiles":
+        controller.collage_min_tiles = int(float(s))
+    elif oid == "collage_max_tiles":
+        controller.collage_max_tiles = int(float(s))
     else:
         log.debug("no command handler for %s", oid)
 
