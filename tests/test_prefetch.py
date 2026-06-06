@@ -308,6 +308,75 @@ def test_set_collage_switches_modes_at_runtime():
         w.stop(timeout=2.0)
 
 
+def test_per_entry_collage_when_selector_requests_it():
+    """Global collage OFF, but the selector reports collage_active() → the
+    worker composites that batch (playlist collage-entry path)."""
+    from immframe.config import CollageConfig
+    selector = MagicMock()
+    selector.next_batch.side_effect = lambda n: [_a(f"p{i}") for i in range(n)]
+    selector.collage_active.return_value = True
+    client = _client_writing_bytes()
+    cfg = CollageConfig(enabled=False, min_tiles=2, max_tiles=2, layout="grid")
+    w = PrefetchWorker(
+        selector, client, queue_size=2, empty_backoff_s=0.01, collage=cfg,
+    )
+    w.set_collage_canvas(120, 90)
+    w.start()
+    try:
+        item = w.next(timeout=3.0)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is not None and item[1].id.startswith("collage-")
+
+
+def test_no_collage_when_disabled_and_selector_inactive():
+    """Global collage OFF and selector reports collage_active() False →
+    plain single-asset items."""
+    from immframe.config import CollageConfig
+    selector = MagicMock()
+    selector.next_batch.side_effect = lambda n: [_a("x0")]
+    selector.collage_active.return_value = False
+    client = _client_writing_bytes()
+    cfg = CollageConfig(enabled=False)
+    w = PrefetchWorker(
+        selector, client, queue_size=2, empty_backoff_s=0.01, collage=cfg,
+    )
+    w.start()
+    try:
+        item = w.next(timeout=2.0)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is not None and not item[1].id.startswith("collage-")
+
+
+def test_playlist_interleaves_singles_and_collages_end_to_end():
+    """Real PrefetchWorker + PlaylistSelector: a single entry emits one item
+    per photo, the next (collage) entry emits one composited item."""
+    from immframe.config import CollageConfig
+    from immframe.immich.selector import PlaylistSelector
+    single_sub = MagicMock()
+    single_sub.next_batch.side_effect = lambda n: [_a("single1"), _a("single2")][:n]
+    collage_sub = MagicMock()
+    collage_sub.next_batch.side_effect = lambda n: [_a(f"c{i}") for i in range(n)]
+    pl = PlaylistSelector([(single_sub, 2, False), (collage_sub, 1, True)])
+    client = _client_writing_bytes()
+    cfg = CollageConfig(enabled=False, min_tiles=2, max_tiles=2, layout="grid")
+    w = PrefetchWorker(pl, client, queue_size=4, empty_backoff_s=0.01, collage=cfg)
+    w.set_collage_canvas(120, 90)
+    w.start()
+    try:
+        ids = []
+        deadline = time.time() + 4.0
+        while time.time() < deadline and len(ids) < 5:
+            it = w.next(timeout=1.0)
+            if it is not None:
+                ids.append(it[1].id)
+    finally:
+        w.stop(timeout=2.0)
+    assert any(i.startswith("single") for i in ids), ids
+    assert any(i.startswith("collage-") for i in ids), ids
+
+
 def test_stop_is_idempotent():
     selector = MagicMock()
     selector.next_batch.return_value = []

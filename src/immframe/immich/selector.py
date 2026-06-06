@@ -350,7 +350,7 @@ class RecentSelector:
 
 
 class PlaylistSelector:
-    """Round-robins through a sequence of (selector, count) entries.
+    """Round-robins through a sequence of (selector, count[, is_collage]) entries.
 
     On each `next_batch(n)` call, draws up to `n` assets from the current
     entry's selector, counting toward its `count` quota. When the quota
@@ -359,39 +359,71 @@ class PlaylistSelector:
 
     Useful for "show 25 random, then 25 on-this-day, then 25 of Alice,
     repeat" without picking just one mode.
+
+    Per-entry collage: an entry may carry `is_collage=True`. The prefetch
+    worker checks `collage_active()` before drawing a batch and, when true,
+    composites that batch into a single collage. For collage entries `count`
+    means *number of collages* (each `next_batch` call is one collage), so a
+    single playlist can interleave full-screen photos and collages from the
+    same source.
     """
 
-    def __init__(self, entries: list[tuple[AssetSelector, int]]) -> None:
+    def __init__(
+        self, entries: list[tuple],
+    ) -> None:
         if not entries:
             raise ValueError("PlaylistSelector requires at least one entry")
-        self._entries = list(entries)
+        self._entries = [self._normalise(e) for e in entries]
         self._lock = threading.Lock()
         self._idx = 0
         self._consumed_this_round = 0
 
+    @staticmethod
+    def _normalise(entry: tuple) -> tuple[AssetSelector, int, bool]:
+        """Accept legacy `(selector, count)` or `(selector, count, is_collage)`."""
+        if len(entry) == 3:
+            sel, cnt, col = entry
+            return (sel, int(cnt), bool(col))
+        sel, cnt = entry
+        return (sel, int(cnt), False)
+
     @property
     def current_scene(self) -> str | None:
         with self._lock:
-            sel, _ = self._entries[self._idx]
+            sel = self._entries[self._idx][0]
         # Expose the inner selector's label if it has one
         return getattr(sel, "current_scene", None)
+
+    def collage_active(self) -> bool:
+        """True when the current entry is a collage entry — the worker should
+        composite this batch rather than emit one slide per asset."""
+        with self._lock:
+            return self._entries[self._idx][2]
 
     def next_batch(self, n: int) -> list[Asset]:
         with self._lock:
             # Try every entry once before giving up — covers the case where
             # the first few are empty (recent with no new uploads, etc.)
             for _ in range(len(self._entries)):
-                sel, cnt = self._entries[self._idx]
+                sel, cnt, is_collage = self._entries[self._idx]
                 remaining = max(0, cnt - self._consumed_this_round)
-                take = min(n, remaining)
-                if take == 0:
+                if remaining == 0:
                     self._advance()
                     continue
-                batch = sel.next_batch(take)
-                if not batch:
-                    self._advance()
-                    continue
-                self._consumed_this_round += len(batch)
+                if is_collage:
+                    # One call == one collage; `n` is the worker's tile count.
+                    batch = sel.next_batch(n)
+                    if not batch:
+                        self._advance()
+                        continue
+                    self._consumed_this_round += 1          # count collages
+                else:
+                    take = min(n, remaining)
+                    batch = sel.next_batch(take)
+                    if not batch:
+                        self._advance()
+                        continue
+                    self._consumed_this_round += len(batch)  # count photos
                 if self._consumed_this_round >= cnt:
                     self._advance()
                 return batch

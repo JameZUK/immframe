@@ -146,12 +146,33 @@ class PrefetchWorker:
         with self._selector_lock:
             return self._selector, self._gen, self._collage
 
+    @staticmethod
+    def _effective_collage(
+        cfg: "CollageConfig | None", selector: AssetSelector
+    ) -> "CollageConfig | None":
+        """The collage config to apply to the next batch, or None for singles.
+
+        `cfg.enabled` is the global master switch (collage everything). When it
+        is off, a selector may still request a collage per-batch — playlist
+        collage entries do this via `collage_active()` — reusing the same
+        layout/tile settings from `cfg`.
+        """
+        if cfg is None:
+            return None
+        if cfg.enabled:
+            return cfg
+        active = getattr(selector, "collage_active", None)
+        if active is not None and active():
+            return cfg
+        return None
+
     def _run(self) -> None:
         while not self._stop_evt.is_set():
             selector, gen, collage = self._snapshot()
+            effective = self._effective_collage(collage, selector)
 
-            if collage is not None:
-                item = self._fetch_collage(selector, collage)
+            if effective is not None:
+                item = self._fetch_collage(selector, effective)
                 if item is None:
                     self._stop_evt.wait(self._empty_backoff_s)
                     continue

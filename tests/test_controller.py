@@ -213,12 +213,15 @@ def test_collage_enabled_toggle_pushes_config_to_prefetch():
     assert arg is not None and arg.enabled is True
 
 
-def test_collage_disabled_passes_none_to_prefetch():
+def test_collage_disabled_passes_disabled_config_to_prefetch():
+    # The worker always gets the settings (so per-entry playlist collage still
+    # works when the global switch is off); `enabled` carries the toggle state.
     c = _controller()
     c.collage_enabled = True
     c._prefetch.set_collage.reset_mock()
     c.collage_enabled = False
-    assert c._prefetch.set_collage.call_args.args[0] is None
+    arg = c._prefetch.set_collage.call_args.args[0]
+    assert arg is not None and arg.enabled is False
 
 
 def test_collage_layout_validates():
@@ -227,6 +230,34 @@ def test_collage_layout_validates():
         c.collage_layout = "spiral"
     c.collage_layout = "grid"
     assert c.collage_layout == "grid"
+
+
+def test_playlist_build_carries_per_entry_collage_flag():
+    from immframe.config import (
+        Config, ImmichConfig, SelectionConfig, VideoConfig, ViewerConfig, ControlConfig,
+    )
+    from immframe.immich.selector import PlaylistSelector
+    sel_cfg = SelectionConfig(
+        default_mode="playlist",
+        playlist=[
+            {"mode": "random", "count": 10},
+            {"mode": "random", "count": 3, "collage": True},
+        ],
+    )
+    cfg = Config(
+        immich=ImmichConfig(url="http://x", api_key="k"),
+        selection=sel_cfg,
+        video=VideoConfig(),
+        viewer=ViewerConfig(raw={}),
+        control=ControlConfig(),
+    )
+    with patch("immframe.controller.ImmichClient"), \
+         patch("immframe.controller.PrefetchWorker"):
+        from immframe.controller import Controller
+        c = Controller(cfg)
+    assert isinstance(c._selector, PlaylistSelector)
+    flags = [entry[2] for entry in c._selector._entries]
+    assert flags == [False, True]
 
 
 def test_collage_tiles_clamp_and_keep_min_le_max():

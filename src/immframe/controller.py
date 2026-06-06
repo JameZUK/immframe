@@ -232,10 +232,12 @@ class Controller:
             # overlay actually shows it. Re-read each fetch so a runtime
             # show_text toggle is honored.
             wants_ocr=lambda: "ocr" in self._show_text_keys,
-            # When collage is on, the worker emits one composited image per
-            # item (instead of one asset); it flows through the render path
-            # unchanged. Label reflects the active selection + tile count.
-            collage=replace(self._collage) if self._collage.enabled else None,
+            # Always hand the worker the collage settings (a fresh copy). The
+            # `enabled` field is the global master switch; even when it's off,
+            # playlist collage entries request collages per-batch and reuse
+            # these layout/tile settings. The composite flows through the
+            # render path unchanged; label reflects the active selection.
+            collage=replace(self._collage),
             collage_label=self._collage_label,
         )
 
@@ -702,9 +704,7 @@ class Controller:
         """Push the current collage shadow state to the prefetch worker (as a
         fresh copy) and force a refresh so the change shows promptly."""
         if self._prefetch is not None:
-            self._prefetch.set_collage(
-                replace(self._collage) if self._collage.enabled else None
-            )
+            self._prefetch.set_collage(replace(self._collage))
         self._force_next_evt.set()
         self._publish_state()
 
@@ -814,7 +814,11 @@ class Controller:
                     log.warning("skipping playlist entry %s: %s", entry, e)
                     continue
                 count = int(entry.get("count", 25))
-                entries.append((sel, count))
+                # Per-entry collage: count then means "number of collages",
+                # tiled from this entry's source using the global collage
+                # settings. Lets a playlist interleave photos and collages.
+                is_collage = bool(entry.get("collage", False))
+                entries.append((sel, count, is_collage))
             if not entries:
                 log.warning(
                     "playlist mode selected but selection.playlist is empty or invalid — "

@@ -450,6 +450,40 @@ def test_playlist_current_scene_proxies_active_sub():
     assert sel.current_scene == "beach"
 
 
+def test_playlist_collage_active_defaults_false_for_legacy_entries():
+    s1 = MagicMock()
+    s1.next_batch.return_value = [_a("x")]
+    sel = PlaylistSelector([(s1, 5)])           # 2-tuple, backward compatible
+    assert sel.collage_active() is False
+
+
+def test_playlist_collage_entry_counts_by_collage_not_assets():
+    s1 = MagicMock()
+    s1.next_batch.return_value = [_a("a"), _a("b"), _a("c")]
+    s2 = MagicMock()
+    s2.next_batch.return_value = [_a("z")]
+    # entry 0: 2 collages; entry 1: 1 single photo
+    sel = PlaylistSelector([(s1, 2, True), (s2, 1, False)])
+
+    assert sel.collage_active() is True
+    b1 = sel.next_batch(3)                       # collage 1 of 2
+    assert {a.id for a in b1} == {"a", "b", "c"}
+    assert sel.collage_active() is True
+    sel.next_batch(3)                            # collage 2 of 2 → quota hit, advance
+    assert sel.collage_active() is False         # now on the single entry
+    b3 = sel.next_batch(3)
+    assert b3[0].id == "z"
+
+
+def test_playlist_mixes_singles_and_collages():
+    s1 = MagicMock()
+    s1.next_batch.return_value = [_a("p1"), _a("p2")]
+    sel = PlaylistSelector([(s1, 2, False), (s1, 1, True)])
+    # First entry: counts photos (2 per call → quota 2 in one call)
+    sel.next_batch(2)
+    assert sel.collage_active() is True          # advanced to the collage entry
+
+
 def test_scene_force_mode_skips_discovery():
     """Useful for tests and explicit user preference."""
     client = MagicMock()
