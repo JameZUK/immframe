@@ -202,6 +202,12 @@ button[data-active="true"] {
   accent-color: var(--accent);
 }
 
+.row input:disabled,
+.row select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .row.toggle label {
   flex: 1;
   min-width: 0;

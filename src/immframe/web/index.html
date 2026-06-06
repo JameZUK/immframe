@@ -82,6 +82,30 @@
       </div>
     </section>
 
+    <section class="card collage">
+      <h2>Collage</h2>
+      <div class="row toggle">
+        <label for="collage-enabled">Collage mode</label>
+        <input id="collage-enabled" type="checkbox">
+      </div>
+      <div class="row">
+        <label>Layout</label>
+        <select id="collage-layout">
+          <option value="auto">Auto</option>
+          <option value="grid">Grid</option>
+          <option value="golden_ratio">Golden ratio</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Min tiles <span id="collage-min-tiles-value" class="num">3</span></label>
+        <input id="collage-min-tiles" type="range" min="2" max="12" step="1">
+      </div>
+      <div class="row">
+        <label>Max tiles <span id="collage-max-tiles-value" class="num">6</span></label>
+        <input id="collage-max-tiles" type="range" min="2" max="12" step="1">
+      </div>
+    </section>
+
     <section class="card display">
       <h2>Display</h2>
       <div class="row toggle">

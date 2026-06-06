@@ -84,6 +84,20 @@ function render(state) {
       cb.checked = active.has(cb.dataset.stKey);
     });
 
+    // Collage
+    const col = state.collage || {};
+    const colOn = !!col.enabled;
+    $("collage-enabled").checked = colOn;
+    $("collage-layout").value = col.layout || "auto";
+    $("collage-min-tiles").value = col.min_tiles ?? 3;
+    $("collage-min-tiles-value").textContent = String(col.min_tiles ?? 3);
+    $("collage-max-tiles").value = col.max_tiles ?? 6;
+    $("collage-max-tiles-value").textContent = String(col.max_tiles ?? 6);
+    // The layout/tile controls only matter when collage is on.
+    ["collage-layout", "collage-min-tiles", "collage-max-tiles"].forEach(id => {
+      $(id).disabled = !colOn;
+    });
+
     // Current asset
     const a = state.current_asset;
     if (a) {
@@ -227,6 +241,34 @@ function wire() {
       if (suppressInput) return;
       safePost("/api/show_text", showTextValues());
     });
+  });
+
+  $("collage-enabled").addEventListener("change", () => {
+    if (suppressInput) return;
+    safePost("/api/collage_enabled", $("collage-enabled").checked);
+  });
+
+  $("collage-layout").addEventListener("change", () => {
+    if (suppressInput) return;
+    safePost("/api/collage_layout", $("collage-layout").value);
+  });
+
+  const collageMinCommit = debounce(() => {
+    if (suppressInput) return;
+    safePost("/api/collage_min_tiles", parseInt($("collage-min-tiles").value, 10));
+  }, DEBOUNCE_MS);
+  $("collage-min-tiles").addEventListener("input", () => {
+    $("collage-min-tiles-value").textContent = String($("collage-min-tiles").value);
+    collageMinCommit();
+  });
+
+  const collageMaxCommit = debounce(() => {
+    if (suppressInput) return;
+    safePost("/api/collage_max_tiles", parseInt($("collage-max-tiles").value, 10));
+  }, DEBOUNCE_MS);
+  $("collage-max-tiles").addEventListener("input", () => {
+    $("collage-max-tiles-value").textContent = String($("collage-max-tiles").value);
+    collageMaxCommit();
   });
 }
 
