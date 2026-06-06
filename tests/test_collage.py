@@ -10,6 +10,7 @@ from immframe.collage import (
     Rect,
     asset_caption,
     choose_layout,
+    combined_caption,
     golden_rects,
     grid_rects,
     is_collage_id,
@@ -18,6 +19,7 @@ from immframe.collage import (
     make_collage_asset,
     parse_hex_color,
     render_collage,
+    smart_collage_caption,
 )
 
 
@@ -222,6 +224,58 @@ def test_render_collage_with_captions(tmp_path: Path):
         paths, [False, False, True], dest,
         canvas_size=(300, 200), gap=4, background="#000000", fit="cover",
         layout="grid", captions=["Jun 2023 · Paris", "", "Alice"],
+    )
+    assert ok and dest.exists()
+    with Image.open(dest) as im:
+        assert im.size == (300, 200)
+
+
+# ── Smart whole-collage caption ───────────────────────────────────────────────
+def test_smart_caption_common_person():
+    a = _capasset(people=("Alice",))
+    b = _capasset(people=("Alice", "Bob"))
+    assert smart_collage_caption([a, b]) == "Alice"
+
+
+def test_smart_caption_common_city_and_day():
+    from immframe.immich.models import GeoInfo
+    geo = GeoInfo(None, None, "Paris", None, "France")
+    a = _capasset(taken_at=datetime(2023, 6, 15), geo=geo)
+    b = _capasset(taken_at=datetime(2023, 6, 15), geo=geo)
+    assert smart_collage_caption([a, b]) == "Paris, France · Jun 15, 2023"
+
+
+def test_smart_caption_month_then_year_granularity():
+    a = _capasset(taken_at=datetime(2023, 6, 2))
+    b = _capasset(taken_at=datetime(2023, 6, 28))
+    assert smart_collage_caption([a, b]) == "Jun 2023"
+    c = _capasset(taken_at=datetime(2023, 1, 2))
+    d = _capasset(taken_at=datetime(2023, 11, 9))
+    assert smart_collage_caption([c, d]) == "2023"
+
+
+def test_smart_caption_empty_when_nothing_shared():
+    from immframe.immich.models import GeoInfo
+    a = _capasset(taken_at=datetime(2020, 1, 1), geo=GeoInfo(None, None, "Paris", None, "France"))
+    b = _capasset(taken_at=datetime(2023, 8, 9), geo=GeoInfo(None, None, "Tokyo", None, "Japan"))
+    assert smart_collage_caption([a, b]) == ""
+
+
+def test_combined_caption_dedups_scene():
+    assert combined_caption("Alice", "Alice · Paris") == "Alice · Paris"   # scene implied
+    assert combined_caption("beach", "") == "beach"
+    assert combined_caption("Last 7 days", "Jun 2023") == "Last 7 days · Jun 2023"
+    assert combined_caption(None, "Paris") == "Paris"
+
+
+def test_render_collage_with_title(tmp_path: Path):
+    from PIL import Image
+    paths = [_make_jpeg(tmp_path / f"s{i}.jpg") for i in range(3)]
+    dest = tmp_path / "out.jpg"
+    ok = render_collage(
+        paths, [False, False, False], dest,
+        canvas_size=(300, 200), gap=4, background="#000000", fit="cover",
+        layout="grid", title="Alice · Paris · Jun 2023",
     )
     assert ok and dest.exists()
     with Image.open(dest) as im:

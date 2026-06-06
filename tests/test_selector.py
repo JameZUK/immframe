@@ -458,27 +458,32 @@ def test_playlist_collage_active_defaults_false_for_legacy_entries():
 
 
 def test_playlist_collage_entry_counts_by_collage_not_assets():
+    from immframe.config import CollageConfig
+    cc = CollageConfig(enabled=True)
     s1 = MagicMock()
     s1.next_batch.return_value = [_a("a"), _a("b"), _a("c")]
     s2 = MagicMock()
     s2.next_batch.return_value = [_a("z")]
     # entry 0: 2 collages; entry 1: 1 single photo
-    sel = PlaylistSelector([(s1, 2, True), (s2, 1, False)])
+    sel = PlaylistSelector([(s1, 2, cc), (s2, 1, None)])
 
     assert sel.collage_active() is True
+    assert sel.current_collage() is cc
     b1 = sel.next_batch(3)                       # collage 1 of 2
     assert {a.id for a in b1} == {"a", "b", "c"}
     assert sel.collage_active() is True
     sel.next_batch(3)                            # collage 2 of 2 → quota hit, advance
     assert sel.collage_active() is False         # now on the single entry
+    assert sel.current_collage() is None
     b3 = sel.next_batch(3)
     assert b3[0].id == "z"
 
 
 def test_playlist_mixes_singles_and_collages():
+    from immframe.config import CollageConfig
     s1 = MagicMock()
     s1.next_batch.return_value = [_a("p1"), _a("p2")]
-    sel = PlaylistSelector([(s1, 2, False), (s1, 1, True)])
+    sel = PlaylistSelector([(s1, 2, None), (s1, 1, CollageConfig(enabled=True))])
     # First entry: counts photos (2 per call → quota 2 in one call)
     sel.next_batch(2)
     assert sel.collage_active() is True          # advanced to the collage entry

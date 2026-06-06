@@ -826,10 +826,11 @@ class Controller:
                     continue
                 count = int(entry.get("count", 25))
                 # Per-entry collage: count then means "number of collages",
-                # tiled from this entry's source using the global collage
-                # settings. Lets a playlist interleave photos and collages.
-                is_collage = bool(entry.get("collage", False))
-                entries.append((sel, count, is_collage))
+                # tiled from this entry's source. None for a normal entry, else
+                # a CollageConfig (global settings merged with per-entry
+                # overrides: layout / tiles / tile_text / smart_caption).
+                collage_cfg = self._entry_collage_cfg(entry)
+                entries.append((sel, count, collage_cfg))
             if not entries:
                 log.warning(
                     "playlist mode selected but selection.playlist is empty or invalid — "
@@ -838,6 +839,41 @@ class Controller:
                 return RandomSelector(self._client, include_videos=self._config.video.enabled)
             return PlaylistSelector(entries)
         raise ValueError(f"unknown selection_mode: {mode!r}")
+
+    def _entry_collage_cfg(self, entry: dict):
+        """Build the CollageConfig for a playlist entry, or None if it isn't a
+        collage entry. Starts from the global collage settings and applies the
+        entry's overrides (layout / tiles / min_tiles / max_tiles / tile_text /
+        smart_caption). Bad overrides are skipped (the global value stands)."""
+        if not bool(entry.get("collage", False)):
+            return None
+        overrides: dict = {}
+        try:
+            layout = entry.get("layout")
+            if layout is not None:
+                if str(layout) in ("auto", "grid", "golden_ratio"):
+                    overrides["layout"] = str(layout)
+                else:
+                    log.warning("playlist collage: bad layout %r — using global", layout)
+            if "tiles" in entry:
+                t = _iclamp(int(entry["tiles"]), 2, 12)
+                overrides["min_tiles"] = overrides["max_tiles"] = t
+            if "min_tiles" in entry:
+                overrides["min_tiles"] = _iclamp(int(entry["min_tiles"]), 2, 12)
+            if "max_tiles" in entry:
+                overrides["max_tiles"] = _iclamp(int(entry["max_tiles"]), 2, 12)
+            mn = overrides.get("min_tiles", self._collage.min_tiles)
+            mx = overrides.get("max_tiles", self._collage.max_tiles)
+            if mn > mx:                                  # keep min <= max
+                overrides["max_tiles"] = mn
+            if "tile_text" in entry:
+                overrides["tile_text"] = str(entry["tile_text"])
+            if "smart_caption" in entry:
+                overrides["smart_caption"] = bool(entry["smart_caption"])
+        except (TypeError, ValueError) as e:
+            log.warning("playlist collage overrides invalid (%s) — using global", e)
+            overrides = {}
+        return replace(self._collage, enabled=True, **overrides)
 
     def _build_selector_from_entry(self, entry: dict) -> AssetSelector:
         """Build a sub-selector for a playlist entry. Each entry may override

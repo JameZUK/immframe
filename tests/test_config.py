@@ -334,6 +334,7 @@ immich:
     assert cfg.collage.max_tiles == 6
     assert cfg.collage.fit == "cover"
     assert cfg.collage.tile_text == ""
+    assert cfg.collage.smart_caption is False
 
 
 def test_collage_tile_text_parsed(tmp_path: Path):
@@ -345,9 +346,11 @@ immich:
 collage:
   enabled: true
   tile_text: "date location"
+  smart_caption: true
 """)
     )
     assert cfg.collage.tile_text == "date location"
+    assert cfg.collage.smart_caption is True
 
 
 def test_collage_enabled_overrides(tmp_path: Path):

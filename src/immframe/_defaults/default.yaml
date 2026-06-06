@@ -50,6 +50,8 @@ collage:
   fit: cover                               # cover (fill + crop) | contain (letterbox)
   tile_text: ""                            # per-tile caption fields, e.g. "date location"
                                             # (keys: caption date location name people tags); "" = off
+  smart_caption: false                     # one caption for the whole collage when its photos
+                                            # share a person/place/date; falls back to tile_text
 
 viewer:
   # Carried through to viewer/display.py — see picframe wiki for the full

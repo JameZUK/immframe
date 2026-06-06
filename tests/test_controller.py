@@ -256,8 +256,38 @@ def test_playlist_build_carries_per_entry_collage_flag():
         from immframe.controller import Controller
         c = Controller(cfg)
     assert isinstance(c._selector, PlaylistSelector)
-    flags = [entry[2] for entry in c._selector._entries]
+    flags = [entry[2] is not None for entry in c._selector._entries]
     assert flags == [False, True]
+    # The collage entry carries a CollageConfig (global merged with overrides)
+    assert c._selector._entries[1][2].enabled is True
+
+
+def test_playlist_entry_collage_overrides():
+    from immframe.config import (
+        Config, ImmichConfig, SelectionConfig, VideoConfig, ViewerConfig, ControlConfig,
+        CollageConfig,
+    )
+    sel_cfg = SelectionConfig(
+        default_mode="playlist",
+        playlist=[
+            {"mode": "people", "count": 3, "collage": True,
+             "tile_text": "people", "layout": "grid", "tiles": 4},
+        ],
+    )
+    cfg = Config(
+        immich=ImmichConfig(url="http://x", api_key="k"),
+        selection=sel_cfg, video=VideoConfig(), viewer=ViewerConfig(raw={}),
+        control=ControlConfig(),
+        collage=CollageConfig(layout="auto", min_tiles=3, max_tiles=6, tile_text=""),
+    )
+    with patch("immframe.controller.ImmichClient"), \
+         patch("immframe.controller.PrefetchWorker"):
+        from immframe.controller import Controller
+        c = Controller(cfg)
+    cc = c._selector._entries[0][2]
+    assert cc.tile_text == "people"
+    assert cc.layout == "grid"
+    assert cc.min_tiles == 4 and cc.max_tiles == 4
 
 
 def test_collage_tiles_clamp_and_keep_min_le_max():

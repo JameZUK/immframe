@@ -379,13 +379,14 @@ class PlaylistSelector:
         self._consumed_this_round = 0
 
     @staticmethod
-    def _normalise(entry: tuple) -> tuple[AssetSelector, int, bool]:
-        """Accept legacy `(selector, count)` or `(selector, count, is_collage)`."""
+    def _normalise(entry: tuple):
+        """Accept legacy `(selector, count)` or `(selector, count, collage)`,
+        where `collage` is a CollageConfig (collage entry) or None (singles)."""
         if len(entry) == 3:
             sel, cnt, col = entry
-            return (sel, int(cnt), bool(col))
+            return (sel, int(cnt), col)
         sel, cnt = entry
-        return (sel, int(cnt), False)
+        return (sel, int(cnt), None)
 
     @property
     def current_scene(self) -> str | None:
@@ -394,18 +395,25 @@ class PlaylistSelector:
         # Expose the inner selector's label if it has one
         return getattr(sel, "current_scene", None)
 
-    def collage_active(self) -> bool:
-        """True when the current entry is a collage entry — the worker should
-        composite this batch rather than emit one slide per asset."""
+    def current_collage(self):
+        """The current entry's collage config (a CollageConfig) when it's a
+        collage entry, else None. The prefetch worker composites the batch
+        using this config (per-entry overrides included)."""
         with self._lock:
             return self._entries[self._idx][2]
+
+    def collage_active(self) -> bool:
+        """True when the current entry is a collage entry."""
+        with self._lock:
+            return self._entries[self._idx][2] is not None
 
     def next_batch(self, n: int) -> list[Asset]:
         with self._lock:
             # Try every entry once before giving up — covers the case where
             # the first few are empty (recent with no new uploads, etc.)
             for _ in range(len(self._entries)):
-                sel, cnt, is_collage = self._entries[self._idx]
+                sel, cnt, col = self._entries[self._idx]
+                is_collage = col is not None
                 remaining = max(0, cnt - self._consumed_this_round)
                 if remaining == 0:
                     self._advance()

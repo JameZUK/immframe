@@ -150,6 +150,11 @@ class CollageConfig:
     # (e.g. "date location"). Empty = no per-tile text. Keys: caption, date,
     # location, name, people, tags.
     tile_text: str = ""
+    # Smart caption: when the photos in a collage share an attribute (the same
+    # people, place, or date), draw ONE dynamically-built caption for the whole
+    # collage instead of per-tile text. Falls back to tile_text when the photos
+    # have nothing in common.
+    smart_caption: bool = False
 
 
 @dataclass
@@ -321,6 +326,7 @@ class Config:
             background=str(col_raw.get("background", "#101018")),
             fit=str(col_raw.get("fit", "cover")),
             tile_text=str(col_raw.get("tile_text", "")),
+            smart_caption=bool(col_raw.get("smart_caption", False)),
         )
         if collage.layout not in ("auto", "grid", "golden_ratio"):
             raise ValueError(

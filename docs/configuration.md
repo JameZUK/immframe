@@ -94,6 +94,7 @@ Per entry:
 - `mode` — required. Any selection mode except `playlist` (no nesting).
 - `count` — how many slides to show before rotating to the next entry (default `25`). For a collage entry (`collage: true`) this is the **number of collages**, not photos.
 - `collage` — optional `true`/`false` (default `false`). When `true`, this entry's photos are tiled into collages instead of shown one-per-slide, using the global [`collage:`](#collage) layout/tile settings. The global `collage.enabled` switch does **not** need to be on — per-entry collage works independently, which lets a single playlist interleave full-screen photos and collages from the same sources.
+- Collage overrides (only on a `collage: true` entry) — `layout`, `tiles` (sets both min and max), `min_tiles`, `max_tiles`, `tile_text`, `smart_caption`. Each overrides the global `collage:` value **for that entry only**, so different entries can caption/lay-out their collages differently (e.g. `tile_text: "people"` on the people entry, `smart_caption: true` on the scene entry). Omitted keys inherit the global `collage:` block.
 - Mode-specific overrides — `album_ids`, `smart_query`, `people_ids`, `days`, `field`. If omitted, falls back to the controller-level config value.
 
 The playlist rotates indefinitely. If a sub-selector returns nothing (e.g. `recent` finds no new uploads), playlist auto-advances to the next entry without stalling.
@@ -107,24 +108,25 @@ selection:
   default_mode: playlist
   playlist:
     - {mode: random, count: 25}
-    - {mode: random, count: 4, collage: true}    # 4 random collages
+    - {mode: random, count: 4, collage: true, smart_caption: true}
     - {mode: scene,  count: 25}
-    - {mode: scene,  count: 4, collage: true}
+    - {mode: scene,  count: 4, collage: true}                       # scene name labels it
     - {mode: memory, count: 5}
     - {mode: recent, count: 10, days: 7}
-    - {mode: recent, count: 4,  days: 7, collage: true}
+    - {mode: recent, count: 4,  days: 7, collage: true, smart_caption: true}
     - {mode: people, count: 10, people_ids: ["uuid-of-alice"]}
-    - {mode: people, count: 4,  people_ids: ["uuid-of-alice"], collage: true}
+    - {mode: people, count: 4,  people_ids: ["uuid-of-alice"], collage: true, tile_text: "date"}
 
 collage:
-  # global enabled stays false — these settings just supply the look the
-  # per-entry collages use (tiles, layout, gutter, …)
+  # global enabled stays false — these settings supply the defaults the
+  # per-entry collages inherit (tiles, layout, gutter, captions, …)
   layout: auto
   min_tiles: 3
   max_tiles: 6
+  smart_caption: true
 ```
 
-This gives: 25 random singles → 4 random collages → 25 scene singles → 4 scene collages → … and so on. (Tip: tile range and layout come from the global `collage:` block; flip `collage.enabled: true` to instead make **every** slide a collage.)
+This gives: 25 random singles → 4 random collages → 25 scene singles → 4 scene collages → … and so on. Each collage entry can override the global look — e.g. above, the `people` entry adds a per-tile date while the others rely on `smart_caption` to label the whole collage by what its photos share. (Tip: flip `collage.enabled: true` to instead make **every** slide a collage.)
 
 You can switch modes at runtime via MQTT, HTTP, the dashboard, or `immframe mode <mode>` — config just sets the starting mode.
 
@@ -188,7 +190,8 @@ display's native resolution.
 | `gap` | int | `8` | Pixels of gutter between tiles and as the outer margin. The `background` shows through. |
 | `background` | hex | `#101018` | Fill colour behind the tiles and in the gaps (`#rgb` or `#rrggbb`). |
 | `fit` | enum | `cover` | How each photo fills its tile. `cover` scales + centre-crops to fill the cell edge-to-edge (no gaps). `contain` letterboxes the photo within the cell against the `background`. |
-| `tile_text` | string | `""` | Space-separated fields to caption **each tile** with (e.g. `"date location"`). Keys: `caption`, `date`, `location`, `name`, `people`, `tags`. The caption is drawn small in the tile's bottom-left as white text with a black outline (legible on any photo). `""` = no per-tile text. Fields with no value for a given photo are skipped, so a scene collage where every photo shares the same place naturally shows the same short label. |
+| `tile_text` | string | `""` | Space-separated fields to caption **each tile** with (e.g. `"date location"`). Keys: `caption`, `date`, `location`, `name`, `people`, `tags`. The caption is drawn small in the tile's bottom-left as white text with a black outline (legible on any photo). `""` = no per-tile text. Fields with no value for a given photo are skipped. |
+| `smart_caption` | bool | `false` | When `true`, if the photos in a collage **share** an attribute — the same person/people, the same place, or the same date — draw **one** dynamically-built caption for the whole collage (larger, bottom-left) and use it as the collage's label, e.g. `Alice · Paris, France · Jun 15, 2023`. The date collapses to the coarsest shared granularity (same day → full date, same month → `Jun 2023`, same year → `2023`). When the photos have nothing in common it falls back to `tile_text`. Pairs naturally with the playlist's themed entries (a `people` collage labels itself with the person; a `scene` collage with the scene). |
 
 `grid` lays out uniform rows×cols (cols ≈ √K); `golden_ratio` recursively
 splits the canvas at the golden ratio (0.618 : 0.382), always cutting the

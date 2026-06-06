@@ -314,7 +314,8 @@ def test_per_entry_collage_when_selector_requests_it():
     from immframe.config import CollageConfig
     selector = MagicMock()
     selector.next_batch.side_effect = lambda n: [_a(f"p{i}") for i in range(n)]
-    selector.collage_active.return_value = True
+    selector.current_collage.return_value = CollageConfig(
+        enabled=True, min_tiles=2, max_tiles=2, layout="grid")
     client = _client_writing_bytes()
     cfg = CollageConfig(enabled=False, min_tiles=2, max_tiles=2, layout="grid")
     w = PrefetchWorker(
@@ -335,7 +336,7 @@ def test_no_collage_when_disabled_and_selector_inactive():
     from immframe.config import CollageConfig
     selector = MagicMock()
     selector.next_batch.side_effect = lambda n: [_a("x0")]
-    selector.collage_active.return_value = False
+    selector.current_collage.return_value = None
     client = _client_writing_bytes()
     cfg = CollageConfig(enabled=False)
     w = PrefetchWorker(
@@ -358,7 +359,8 @@ def test_playlist_interleaves_singles_and_collages_end_to_end():
     single_sub.next_batch.side_effect = lambda n: [_a("single1"), _a("single2")][:n]
     collage_sub = MagicMock()
     collage_sub.next_batch.side_effect = lambda n: [_a(f"c{i}") for i in range(n)]
-    pl = PlaylistSelector([(single_sub, 2, False), (collage_sub, 1, True)])
+    entry_cc = CollageConfig(enabled=True, min_tiles=2, max_tiles=2, layout="grid")
+    pl = PlaylistSelector([(single_sub, 2, None), (collage_sub, 1, entry_cc)])
     client = _client_writing_bytes()
     cfg = CollageConfig(enabled=False, min_tiles=2, max_tiles=2, layout="grid")
     w = PrefetchWorker(pl, client, queue_size=4, empty_backoff_s=0.01, collage=cfg)
@@ -375,6 +377,39 @@ def test_playlist_interleaves_singles_and_collages_end_to_end():
         w.stop(timeout=2.0)
     assert any(i.startswith("single") for i in ids), ids
     assert any(i.startswith("collage-") for i in ids), ids
+
+
+def test_smart_caption_becomes_collage_label():
+    """When the photos share a person, smart_caption produces one whole-collage
+    caption that's used as the synthetic asset's label."""
+    from immframe.config import CollageConfig
+    from immframe.immich.models import Asset, AssetKind, GeoInfo
+
+    def _alice(aid):
+        return Asset(
+            id=aid, kind=AssetKind.IMAGE, original_file_name=f"{aid}.jpg",
+            mime_type="image/jpeg", width=100, height=100, taken_at=None,
+            geo=GeoInfo(None, None, None, None, None), camera_make=None, camera_model=None,
+            title=None, caption=None, tag_names=(), people=("Alice",), favorite=False,
+            live_photo_video_id=None,
+        )
+
+    selector = MagicMock()
+    selector.next_batch.side_effect = lambda n: [_alice(f"p{i}") for i in range(n)]
+    selector.current_collage.return_value = CollageConfig(
+        enabled=True, min_tiles=2, max_tiles=2, layout="grid", smart_caption=True)
+    selector.current_scene = None
+    client = _client_writing_bytes()
+    cfg = CollageConfig(enabled=False)
+    w = PrefetchWorker(selector, client, queue_size=2, empty_backoff_s=0.01, collage=cfg)
+    w.set_collage_canvas(120, 90)
+    w.start()
+    try:
+        item = w.next(timeout=3.0)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is not None
+    assert item[1].caption == "Alice"
 
 
 def test_stop_is_idempotent():

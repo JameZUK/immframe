@@ -154,16 +154,18 @@ class PrefetchWorker:
 
         `cfg.enabled` is the global master switch (collage everything). When it
         is off, a selector may still request a collage per-batch — playlist
-        collage entries do this via `collage_active()` — reusing the same
-        layout/tile settings from `cfg`.
+        collage entries do this via `current_collage()`, which returns a (possibly
+        per-entry-overridden) CollageConfig.
         """
         if cfg is None:
             return None
         if cfg.enabled:
             return cfg
-        active = getattr(selector, "collage_active", None)
-        if active is not None and active():
-            return cfg
+        getter = getattr(selector, "current_collage", None)
+        if getter is not None:
+            per_entry = getter()
+            if per_entry is not None:
+                return per_entry
         return None
 
     def _run(self) -> None:
@@ -280,18 +282,33 @@ class PrefetchWorker:
             return None
 
         from ..collage import (
-            render_collage, make_collage_asset, asset_caption, COLLAGE_ID_PREFIX,
+            render_collage, make_collage_asset, asset_caption,
+            smart_collage_caption, combined_caption, COLLAGE_ID_PREFIX,
         )
         stem = f"{COLLAGE_ID_PREFIX}{self._next_seq()}"
         dest = self._tmp_dir / f"{stem}.jpg"
+        assets = [a for _, a in sources]
+        count = len(sources)
+        label = self._collage_label(count) if self._collage_label else f"{count} photos"
+
+        # Smart caption first: if the photos share people/place/date, draw one
+        # caption for the whole collage and use it as the label. Otherwise fall
+        # back to per-tile captions (tile_text).
+        title = None
         captions = None
-        tile_text = getattr(cfg, "tile_text", "") or ""
-        if tile_text.strip():
-            fields = tile_text.split()
-            captions = [asset_caption(a, fields) for _, a in sources]
+        if getattr(cfg, "smart_caption", False):
+            scene = getattr(selector, "current_scene", None)
+            overall = combined_caption(scene, smart_collage_caption(assets))
+            if overall:
+                title = overall
+                label = overall
+        if title is None and (getattr(cfg, "tile_text", "") or "").strip():
+            fields = cfg.tile_text.split()
+            captions = [asset_caption(a, fields) for a in assets]
+
         ok = render_collage(
             [p for p, _ in sources],
-            [a.is_portrait for _, a in sources],
+            [a.is_portrait for a in assets],
             dest,
             canvas_size=self._collage_canvas,
             gap=cfg.gap,
@@ -299,14 +316,13 @@ class PrefetchWorker:
             fit=cfg.fit,
             layout=cfg.layout,
             captions=captions,
+            title=title,
         )
         self._cleanup_sources(sources)                  # composite is self-contained
         if not ok:
             dest.unlink(missing_ok=True)
             return None
 
-        count = len(sources)
-        label = self._collage_label(count) if self._collage_label else f"{count} photos"
         return (dest, make_collage_asset(stem, label, count), None)
 
     def _cleanup_sources(self, sources: list[tuple[Path, Asset]]) -> None:

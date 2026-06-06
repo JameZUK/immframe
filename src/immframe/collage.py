@@ -76,6 +76,59 @@ def asset_caption(asset, fields: list[str], *, date_fmt: str = "%b %Y") -> str:
     return " · ".join(parts)
 
 
+def smart_collage_caption(
+    assets,
+    *,
+    day_fmt: str = "%b %-d, %Y",
+    month_fmt: str = "%b %Y",
+) -> str:
+    """A single caption describing what ALL the photos in a collage share —
+    common people, then place, then date granularity. Empty when they have
+    nothing in common (caller then falls back to per-tile captions)."""
+    if not assets:
+        return ""
+    parts: list[str] = []
+
+    # People present in *every* photo.
+    people_sets = [set(a.people) for a in assets]
+    if all(people_sets):
+        common = set.intersection(*people_sets)
+        if common:
+            names = sorted(common)
+            parts.append(", ".join(names[:3]) + ("…" if len(names) > 3 else ""))
+
+    # Same place: all share a city (with country), else all share a country.
+    cities = {a.geo.city for a in assets}
+    countries = {a.geo.country for a in assets}
+    if len(cities) == 1 and None not in cities:
+        city = next(iter(cities))
+        country = next(iter(countries)) if (len(countries) == 1 and None not in countries) else None
+        parts.append(f"{city}, {country}" if country else city)
+    elif len(countries) == 1 and None not in countries:
+        parts.append(next(iter(countries)))
+
+    # Same date, at the coarsest granularity they all share.
+    dates = [a.taken_at for a in assets]
+    if all(d is not None for d in dates):
+        if len({d.date() for d in dates}) == 1:
+            parts.append(dates[0].strftime(day_fmt))
+        elif len({(d.year, d.month) for d in dates}) == 1:
+            parts.append(dates[0].strftime(month_fmt))
+        elif len({d.year for d in dates}) == 1:
+            parts.append(str(dates[0].year))
+
+    return " · ".join(parts)
+
+
+def combined_caption(scene: str | None, smart: str) -> str:
+    """Merge a selection theme label (scene/person name, 'Last 7 days', …)
+    with the smart metadata caption, skipping the theme when it's already
+    implied by the smart text."""
+    if scene and (not smart or scene.lower() not in smart.lower()):
+        return " · ".join(p for p in (scene, smart) if p)
+    return smart
+
+
 @dataclass(frozen=True)
 class Rect:
     """A tile rectangle in pixels (floats; rounded at paste time)."""
@@ -222,6 +275,22 @@ def _draw_tile_caption(draw, text: str, rect: Rect, base_fs: int, cache: dict) -
     )
 
 
+def _draw_collage_title(draw, text: str, canvas_size: tuple[int, int]) -> None:
+    w, h = canvas_size
+    fs = max(18, round(h * 0.04))                       # larger than per-tile
+    font = _get_font(fs, {})
+    if font is None:
+        return
+    margin = max(8, fs // 2)
+    text = _truncate(draw, text, font, w - 2 * margin)
+    if not text:
+        return
+    draw.text(
+        (margin, h - fs - margin), text, font=font, fill=(255, 255, 255),
+        stroke_width=max(2, fs // 10), stroke_fill=(0, 0, 0),
+    )
+
+
 def render_collage(
     image_paths: list[Path],
     is_portrait: list[bool],
@@ -233,12 +302,14 @@ def render_collage(
     fit: str,
     layout: str,
     captions: list[str] | None = None,
+    title: str | None = None,
 ) -> bool:
     """Composite `image_paths` into one JPEG at `dest`. Returns True on success.
 
     A tile that fails to load is left as background rather than aborting the
-    whole collage. When `captions` is given (one string per image), each tile
-    gets a small outlined caption in its bottom-left corner. Writes atomically.
+    whole collage. `captions` (one string per image) draws a small caption in
+    each tile's corner; `title` draws a single larger caption for the whole
+    collage in the bottom-left. Writes atomically.
     """
     from PIL import Image, ImageOps, ImageDraw         # lazy: keep geometry PIL-free
 
@@ -270,7 +341,10 @@ def render_collage(
         except Exception as e:                         # noqa: BLE001 — one bad tile ≠ dead collage
             log.warning("collage tile load failed for %s: %s", path, e)
 
-    if captions and any(captions):
+    if title:
+        draw = ImageDraw.Draw(canvas)
+        _draw_collage_title(draw, title, canvas_size)
+    elif captions and any(captions):
         draw = ImageDraw.Draw(canvas)
         base_fs = max(14, round(canvas_size[1] * 0.024))
         font_cache: dict = {}
