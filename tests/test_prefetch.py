@@ -72,7 +72,7 @@ def test_videos_get_poster_jpeg_downloaded():
     try:
         item = w.next(timeout=2.0)
         assert item is not None
-        path, asset = item
+        path, asset, _ocr = item
         assert asset.id == "v"
         assert path is not None
         # Poster file actually exists on disk (download succeeded)
@@ -100,7 +100,7 @@ def test_video_poster_download_failure_falls_back_to_none():
         w.stop(timeout=2.0)
 
     assert item is not None
-    path, asset = item
+    path, asset, _ocr = item
     assert path is None
     assert asset.id == "v"
 
@@ -173,6 +173,61 @@ def test_download_failure_is_skipped():
     finally:
         w.stop(timeout=2.0)
     assert item is not None and item[1].id == "good"
+
+
+def test_ocr_fetched_off_thread_when_wanted():
+    """When the consumer asks for OCR, the worker fetches it (off the render
+    thread) and attaches it to the queue item."""
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("x")], []]
+    client = _client_writing_bytes()
+    client.get_ocr.return_value = ["hello", "world"]
+    w = PrefetchWorker(
+        selector, client, queue_size=5, empty_backoff_s=0.01,
+        wants_ocr=lambda: True,
+    )
+    w.start()
+    try:
+        item = w.next(timeout=2.0)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is not None
+    assert item[2] == ["hello", "world"]
+    client.get_ocr.assert_called_once_with("x")
+
+
+def test_ocr_not_fetched_by_default():
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("x")], []]
+    client = _client_writing_bytes()
+    w = PrefetchWorker(selector, client, queue_size=5, empty_backoff_s=0.01)
+    w.start()
+    try:
+        item = w.next(timeout=2.0)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is not None and item[2] is None
+    client.get_ocr.assert_not_called()
+
+
+def test_ocr_failure_does_not_drop_the_item():
+    """A failing OCR call must not lose the slide — item still queues, ocr None."""
+    from immframe.immich.client import ImmichError
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("x")], []]
+    client = _client_writing_bytes()
+    client.get_ocr.side_effect = ImmichError("ocr 500")
+    w = PrefetchWorker(
+        selector, client, queue_size=5, empty_backoff_s=0.01,
+        wants_ocr=lambda: True,
+    )
+    w.start()
+    try:
+        item = w.next(timeout=2.0)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is not None
+    assert item[1].id == "x" and item[2] is None
 
 
 def test_stop_is_idempotent():

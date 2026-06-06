@@ -3,13 +3,19 @@
 Pipeline:
     selector.next_batch(...) -> [Asset]
     for each asset:
-        if image:  download preview to a temp file → queue (path, asset)
-        if video:  queue (None, asset) — streamed by MPV directly from Immich
+        if image:  download preview to a temp file → queue (path, asset, ocr)
+        if video:  queue (path|None, asset, None) — MPV streams the clip
+                   directly from Immich; `path` is the matted-poster JPEG
 
-Ownership: after `next()` returns `(path, asset)`, the CALLER owns `path`
-and must `unlink(missing_ok=True)` it once the slide is done. `path` is
-`None` for videos (no temp file). The worker only deletes files that are
-still in the queue when `drain()`/`stop()` is called.
+Queue items are `(path, asset, ocr)` triples. `ocr` is the list of OCR
+strings for the asset (fetched here, OFF the render thread) when the caller
+asked for it via `wants_ocr`, else `None`. Doing the OCR round-trip in this
+worker keeps the controller's render loop from blocking on the network.
+
+Ownership: after `next()` returns `(path, asset, ocr)`, the CALLER owns
+`path` and must `unlink(missing_ok=True)` it once the slide is done. `path`
+is `None` for videos whose poster download failed. The worker only deletes
+files that are still in the queue when `drain()`/`stop()` is called.
 
 `drain()` empties the queue without stopping the worker — call when swapping
 selector or filters so stale assets don't surface.
@@ -22,6 +28,7 @@ import shutil
 import tempfile
 import threading
 from pathlib import Path
+from typing import Callable
 
 from .client import ImmichClient, ImmichError
 from .models import Asset, AssetKind
@@ -30,7 +37,7 @@ from .selector import AssetSelector
 log = logging.getLogger(__name__)
 
 
-QueueItem = tuple[Path | None, Asset]
+QueueItem = tuple[Path | None, Asset, list[str] | None]
 
 
 class PrefetchWorker:
@@ -41,8 +48,11 @@ class PrefetchWorker:
         *,
         queue_size: int = 5,
         empty_backoff_s: float = 5.0,
+        wants_ocr: Callable[[], bool] | None = None,
     ) -> None:
         self._client = client
+        # Predicate, re-read per fetch so a runtime show_text toggle is honored.
+        self._wants_ocr = wants_ocr or (lambda: False)
         self._selector_lock = threading.Lock()
         self._selector = selector
         self._gen = 0                                   # bumped on set_selector / drain
@@ -98,7 +108,7 @@ class PrefetchWorker:
     def _drain_queue(self) -> None:
         while True:
             try:
-                path, _ = self._queue.get_nowait()
+                path = self._queue.get_nowait()[0]
             except queue.Empty:
                 return
             if path is not None:
@@ -131,7 +141,7 @@ class PrefetchWorker:
                 # Discard if selector was swapped while we were downloading.
                 _, gen_now = self._snapshot()
                 if gen_now != gen:
-                    path, _ = item
+                    path = item[0]
                     if path is not None:
                         path.unlink(missing_ok=True)
                     break
@@ -147,7 +157,7 @@ class PrefetchWorker:
             except ImmichError as e:
                 log.warning("download_preview(%s) failed: %s", asset.id, e)
                 return None
-            return (dest, asset)
+            return (dest, asset, self._fetch_ocr(asset))
         if asset.kind == AssetKind.VIDEO:
             # Also fetch a still poster JPEG for videos — the controller
             # renders it via pi3d (matted, faded-in) before MPV takes over
@@ -156,14 +166,26 @@ class PrefetchWorker:
             dest = self._tmp_dir / f"{asset.id}.poster.jpg"
             try:
                 self._client.download_preview(asset.id, dest)
-                return (dest, asset)
+                return (dest, asset, None)
             except ImmichError as e:
                 log.warning(
                     "video poster download(%s) failed: %s — playing without poster",
                     asset.id, e,
                 )
-                return (None, asset)
+                return (None, asset, None)
         return None                                     # OTHER/AUDIO: skip
+
+    def _fetch_ocr(self, asset: Asset) -> list[str] | None:
+        """Fetch OCR text for an image when the consumer wants it. Done here,
+        on the worker thread, so the render loop never blocks on this network
+        round-trip. Returns None when not wanted or on failure."""
+        if not self._wants_ocr():
+            return None
+        try:
+            return self._client.get_ocr(asset.id)
+        except ImmichError as e:
+            log.debug("get_ocr(%s) failed: %s", asset.id, e)
+            return None
 
     def _enqueue(self, item: QueueItem) -> bool:
         """Block on a full queue; return False if shutdown was signalled."""
@@ -173,7 +195,7 @@ class PrefetchWorker:
                 return True
             except queue.Full:
                 continue
-        path, _ = item
+        path = item[0]
         if path is not None:
             path.unlink(missing_ok=True)
         return False

@@ -157,6 +157,37 @@ def test_missing_config_with_explicit_path_raises(tmp_path: Path):
         Config.load(tmp_path / "nope.yaml")
 
 
+def test_empty_immich_url_raises(tmp_path: Path):
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: ""
+  api_key: k
+""",
+    )
+    with pytest.raises(ValueError, match="immich.url"):
+        Config.load(cfg_yaml)
+
+
+def test_prefetch_count_floored_at_one(tmp_path: Path):
+    """prefetch_count: 0 must not become an unbounded queue."""
+    cfg_yaml = _write(
+        tmp_path,
+        "config.yaml",
+        """
+immich:
+  url: https://immich.example
+  api_key: k
+selection:
+  prefetch_count: 0
+""",
+    )
+    cfg = Config.load(cfg_yaml)
+    assert cfg.selection.prefetch_count == 1
+
+
 def test_http_inline_credentials(tmp_path: Path):
     cfg_yaml = _write(
         tmp_path,

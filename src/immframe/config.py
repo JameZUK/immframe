@@ -219,13 +219,16 @@ class Config:
             raise ValueError(
                 "immich.api_key is empty — set it inline or via ${ENV_VAR} substitution"
             )
+        url = str(immich_raw.get("url") or "").strip()
+        if not url:
+            raise ValueError("immich.url is required (e.g. https://immich.example)")
         image_size = immich_raw.get("image_size", "fullsize")
         if image_size not in ("preview", "fullsize"):
             raise ValueError(
                 f"immich.image_size must be 'preview' or 'fullsize'; got {image_size!r}"
             )
         immich = ImmichConfig(
-            url=immich_raw["url"].rstrip("/"),
+            url=url.rstrip("/"),
             api_key=api_key,
             timeout_s=float(immich_raw.get("timeout_s", 10.0)),
             image_size=image_size,
@@ -240,7 +243,9 @@ class Config:
             recent_days=int(sel_raw.get("recent_days", 30)),
             recent_field=sel_raw.get("recent_field", "created"),
             playlist=list(sel_raw.get("playlist", [])),
-            prefetch_count=int(sel_raw.get("prefetch_count", 5)),
+            # Floor at 1: queue.Queue(maxsize=0) is UNBOUNDED, which would
+            # remove the backpressure that caps prefetch disk usage.
+            prefetch_count=max(1, int(sel_raw.get("prefetch_count", 5))),
         )
         valid_modes = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
         if selection.default_mode not in valid_modes:

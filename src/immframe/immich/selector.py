@@ -449,6 +449,10 @@ class SceneSelector:
         # Resolved on first call:
         self._mode: SceneSelector.SourceMode | None = None
         self._city_facet: str | None = None              # actual facet name in this Immich version
+        # explore() result from _discover_mode, reused once by the immediately
+        # following _collect_labels to avoid a duplicate round-trip. Cleared
+        # after use so later label refills re-fetch fresh facets.
+        self._explore_cache: dict[str, list[str]] | None = None
         # Per-rotation state:
         self._labels: list[str] = []
         self._current_scene: str | None = None
@@ -507,6 +511,8 @@ class SceneSelector:
             log.warning("explore failed: %s — falling back to curated queries", e)
             return "curated"
 
+        self._explore_cache = explore  # reused by the following _collect_labels
+
         if explore.get("things"):
             return "things"
 
@@ -526,14 +532,17 @@ class SceneSelector:
         return "curated"
 
     def _collect_labels(self) -> list[str]:
+        cached = self._explore_cache
+        self._explore_cache = None
         if self._mode == "things":
             try:
-                return list(self._client.explore().get("things", []))
+                explore = cached if cached is not None else self._client.explore()
+                return list(explore.get("things", []))
             except ImmichError:
                 return []
         if self._mode == "city":
             try:
-                explore = self._client.explore()
+                explore = cached if cached is not None else self._client.explore()
             except ImmichError:
                 return []
             if self._city_facet and explore.get(self._city_facet):

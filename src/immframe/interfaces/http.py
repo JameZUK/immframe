@@ -109,6 +109,15 @@ class HttpInterface:
         # only listens for v4 clients, which breaks on IPv6-only networks.
         if family == socket.AF_INET6 and bind == "0.0.0.0":
             bind = "::"
+        if self._cfg.auth and not self._cfg.username:
+            public = bind not in ("127.0.0.1", "::1", "localhost")
+            log.warning(
+                "control.http.auth is true but control.http.username is empty — "
+                "authentication is DISABLED; every endpoint (including the image "
+                "proxy) is reachable WITHOUT credentials%s. Set "
+                "control.http.username and control.http.password.",
+                " ON THE LAN" if public else " on loopback",
+            )
         server = _Server((bind, port), _Handler, self._ctrl, self._client,
                          self._cfg, address_family=family)
         thread = threading.Thread(target=server.serve_forever, name="http", daemon=True)

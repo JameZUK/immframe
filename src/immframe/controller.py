@@ -24,7 +24,6 @@ from .config import Config, SelectionMode
 from .immich.client import ImmichClient
 from .immich.models import Asset, AssetKind
 from .immich.prefetch import PrefetchWorker
-from .immich.client import ImmichError
 from .immich.selector import (
     AlbumSelector,
     AssetSelector,
@@ -219,6 +218,10 @@ class Controller:
             self._selector,
             self._client,
             queue_size=config.selection.prefetch_count,
+            # Fetch OCR in the worker (off the render thread) only while the
+            # overlay actually shows it. Re-read each fetch so a runtime
+            # show_text toggle is honored.
+            wants_ocr=lambda: "ocr" in self._show_text_keys,
         )
 
         # Lazily constructed in start() so module import doesn't pull pi3d/mpv
@@ -319,7 +322,7 @@ class Controller:
                         break
                     continue
 
-                new_path, asset = item
+                new_path, asset, ocr_text = item
 
                 is_video = asset.kind == AssetKind.VIDEO
                 can_play_video = self._video_player is not None and self._config.video.enabled
@@ -349,13 +352,8 @@ class Controller:
                 self._current_asset = asset
                 self._publish_state()
 
-                ocr_text: list[str] | None = None
-                if "ocr" in self._show_text_keys and asset.kind == AssetKind.IMAGE:
-                    try:
-                        ocr_text = self._client.get_ocr(asset.id)
-                    except ImmichError as e:
-                        log.debug("get_ocr(%s) failed: %s", asset.id, e)
-
+                # OCR (when shown) was already fetched by the prefetch worker,
+                # off the render thread — see PrefetchWorker._fetch_ocr.
                 pic = Pic(str(new_path), asset, ocr_text=ocr_text)
                 pics_arg = [pic, None]                  # picframe slideshow_is_running shape
                 loop_running, _, _ = viewer.slideshow_is_running(
@@ -420,6 +418,31 @@ class Controller:
                 self._video_player.stop()
                 return
 
+    def _hold_rendering(self, seconds: float) -> None:
+        """Keep the pi3d slideshow drawing for `seconds` before a video starts.
+
+        Unlike `self._stop_evt.wait(seconds)`, this pumps the render loop so the
+        current slide's crossfade actually animates (otherwise the matted poster
+        / live-photo still is drawn once at ~0 alpha and frozen — effectively
+        invisible) and the compositor stays responsive. pi3d's `loop_running()`
+        throttles to the configured FPS, so this paces itself. Returns early on
+        shutdown or if the display loop stops."""
+        if seconds <= 0:
+            return
+        viewer = self._viewer
+        if viewer is None:                              # no display (tests): just wait
+            self._stop_evt.wait(seconds)
+            return
+        deadline = time.time() + seconds
+        while not self._stop_evt.is_set() and time.time() < deadline:
+            running, _, _ = viewer.slideshow_is_running(
+                time_delay=self._time_delay,
+                fade_time=self._fade_time,
+                paused=self._paused,
+            )
+            if not running:
+                break
+
     def _play_live_photo(self, asset: Asset) -> None:
         """For an image asset with a livePhotoVideoId, play the motion
         clip after the still has been visible briefly."""
@@ -429,11 +452,9 @@ class Controller:
             or not self._config.video.enabled
         ):
             return
-        hold = max(0.0, self._config.video.live_photo_hold_s)
-        if hold > 0:
-            self._stop_evt.wait(hold)
-            if self._stop_evt.is_set():
-                return
+        self._hold_rendering(max(0.0, self._config.video.live_photo_hold_s))
+        if self._stop_evt.is_set():
+            return
         url, headers = self._client.video_play_args(asset.live_photo_video_id)
         log.info("live photo: asset=%s motion=%s", asset.id, asset.live_photo_video_id)
         self._play_video_url(url, headers)
@@ -443,11 +464,9 @@ class Controller:
         still for `video.poster_hold_s` then play the video through MPV."""
         if self._video_player is None or not self._config.video.enabled:
             return
-        hold = max(0.0, self._config.video.poster_hold_s)
-        if hold > 0:
-            self._stop_evt.wait(hold)
-            if self._stop_evt.is_set():
-                return
+        self._hold_rendering(max(0.0, self._config.video.poster_hold_s))
+        if self._stop_evt.is_set():
+            return
         self._play_video(asset)
 
     def stop(self) -> None:

@@ -2,6 +2,7 @@ import time
 import subprocess
 import logging
 import os
+from pathlib import Path
 from typing import Optional, List, Tuple
 from datetime import datetime
 from PIL import Image, ImageFilter, ImageFile
@@ -208,7 +209,9 @@ class ViewerDisplay:
                 card_list = [self.__display_drmcard]
             for c in card_list:
                 try:
-                    output = subprocess.check_output(["cat", f"/sys/class/drm/card{c}-{self.__display_hdmi}/status"])
+                    # Read sysfs directly — no per-poll `cat` subprocess. This
+                    # getter runs on every /api/state and MQTT publish.
+                    output = Path(f"/sys/class/drm/card{c}-{self.__display_hdmi}/status").read_bytes()
                     self.__display_drmcard = c #didn't trigger FileNotFoundError so this is a valid card num
                     if output[:9] == b'connected':
                         return True
@@ -254,7 +257,9 @@ class ViewerDisplay:
         elif self.__display_power == 3:
             try:  # try sending on or off to drm card status
                 if self.__display_drmcard is None:
-                    _ison = self.display_is_on() # should find card num
+                    # property access (NOT a call) — its getter resolves and
+                    # caches the card number as a side effect.
+                    _ = self.display_is_on
                 on_off_txt = 'on' if on_off else 'off'
                 drm_card_cmd = f"echo {on_off_txt} | sudo tee /sys/class/drm/card{self.__display_drmcard}-{self.__display_hdmi}/status"
                 os.system(drm_card_cmd)
@@ -700,8 +705,20 @@ class ViewerDisplay:
             self.__next_tm = tm + time_delay
             self.__name_tm = tm + fade_time + self.__show_text_tm  # text starts after slide transition
             if new_sfg is not None:  # this is a possible return value which needs to be caught
+                evicted = self.__sbg  # texture two slides back, about to be orphaned
                 self.__sbg = self.__sfg
                 self.__sfg = new_sfg
+                # Free its GPU texture — pi3d does not unload textures on its
+                # own, so without this every slide leaks one over a 24/7 run.
+                # The evicted texture is no longer bound to the slide (the next
+                # draw uses [new_sfg, old_sfg]); guard against the first-slide
+                # aliasing where sbg/sfg point at the same object.
+                if (evicted is not None and evicted is not self.__sfg
+                        and evicted is not self.__sbg):
+                    try:
+                        evicted.unload_opengl()
+                    except Exception as e:
+                        self.__logger.debug("texture unload failed: %s", e)
             else:
                 (self.__sbg, self.__sfg) = (self.__sfg, self.__sbg)  # swap existing images over
             self.__alpha = 0.0
