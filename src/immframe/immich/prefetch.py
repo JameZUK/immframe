@@ -279,9 +279,16 @@ class PrefetchWorker:
             self._cleanup_sources(sources)
             return None
 
-        from ..collage import render_collage, make_collage_asset
-        stem = f"collage-{self._next_seq()}"
+        from ..collage import (
+            render_collage, make_collage_asset, asset_caption, COLLAGE_ID_PREFIX,
+        )
+        stem = f"{COLLAGE_ID_PREFIX}{self._next_seq()}"
         dest = self._tmp_dir / f"{stem}.jpg"
+        captions = None
+        tile_text = getattr(cfg, "tile_text", "") or ""
+        if tile_text.strip():
+            fields = tile_text.split()
+            captions = [asset_caption(a, fields) for _, a in sources]
         ok = render_collage(
             [p for p, _ in sources],
             [a.is_portrait for _, a in sources],
@@ -291,6 +298,7 @@ class PrefetchWorker:
             background=cfg.background,
             fit=cfg.fit,
             layout=cfg.layout,
+            captions=captions,
         )
         self._cleanup_sources(sources)                  # composite is self-contained
         if not ok:

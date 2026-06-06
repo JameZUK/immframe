@@ -4,17 +4,34 @@ from pathlib import Path
 
 import pytest
 
+from datetime import datetime
+
 from immframe.collage import (
     Rect,
+    asset_caption,
     choose_layout,
     golden_rects,
     grid_rects,
+    is_collage_id,
     is_perfect_square,
     layout_rects,
     make_collage_asset,
     parse_hex_color,
     render_collage,
 )
+
+
+def _capasset(**kw):
+    from immframe.immich.models import Asset, AssetKind, GeoInfo
+    d = dict(
+        id="x", kind=AssetKind.IMAGE, original_file_name="IMG_1.jpg",
+        mime_type="image/jpeg", width=100, height=100, taken_at=None,
+        geo=GeoInfo(None, None, None, None, None), camera_make=None, camera_model=None,
+        title=None, caption=None, tag_names=(), people=(), favorite=False,
+        live_photo_video_id=None,
+    )
+    d.update(kw)
+    return Asset(**d)
 
 _EPS = 1e-6
 
@@ -173,6 +190,44 @@ def test_render_collage_needs_two(tmp_path: Path):
     assert not dest.exists()
 
 
+# ── Per-tile captions ───────────────────────────────────────────────────────
+def test_asset_caption_date_and_location():
+    from immframe.immich.models import GeoInfo
+    a = _capasset(taken_at=datetime(2023, 6, 15),
+                  geo=GeoInfo(None, None, "Paris", None, "France"))
+    assert asset_caption(a, ["date", "location"]) == "Jun 2023 · Paris, France"
+
+
+def test_asset_caption_skips_absent_fields():
+    a = _capasset(caption="Birthday")
+    # location has no value → skipped, only caption remains
+    assert asset_caption(a, ["caption", "location"]) == "Birthday"
+
+
+def test_asset_caption_empty_when_nothing_available():
+    assert asset_caption(_capasset(), ["date", "location"]) == ""
+
+
+def test_asset_caption_people_and_name():
+    a = _capasset(people=("Alice", "Bob"), original_file_name="DSC_9.jpg")
+    assert asset_caption(a, ["people"]) == "Alice, Bob"
+    assert asset_caption(a, ["name"]) == "DSC_9.jpg"
+
+
+def test_render_collage_with_captions(tmp_path: Path):
+    from PIL import Image
+    paths = [_make_jpeg(tmp_path / f"s{i}.jpg") for i in range(3)]
+    dest = tmp_path / "out.jpg"
+    ok = render_collage(
+        paths, [False, False, True], dest,
+        canvas_size=(300, 200), gap=4, background="#000000", fit="cover",
+        layout="grid", captions=["Jun 2023 · Paris", "", "Alice"],
+    )
+    assert ok and dest.exists()
+    with Image.open(dest) as im:
+        assert im.size == (300, 200)
+
+
 # ── Synthetic asset ─────────────────────────────────────────────────────────
 def test_make_collage_asset():
     from immframe.immich.models import AssetKind
@@ -182,3 +237,5 @@ def test_make_collage_asset():
     assert a.caption == "Random • 4 photos"
     assert a.original_file_name == "Random • 4 photos"
     assert a.live_photo_video_id is None
+    assert is_collage_id(a.id) is True
+    assert is_collage_id("abc12345-real-asset") is False

@@ -192,6 +192,10 @@ class Controller:
         self._force_next_evt = threading.Event()
         self._paused = False
         self._current_asset: Asset | None = None
+        # Local file backing the current slide (the prefetched preview, or a
+        # composited collage). Served by the HTTP /api/current_image endpoint —
+        # collages aren't real Immich assets so the image proxy can't fetch them.
+        self._current_path: Path | None = None
         self._selection_mode: SelectionMode = config.selection.default_mode
         self._album_ids: list[str] = list(config.selection.album_ids)
         self._smart_query: str = config.selection.smart_query
@@ -388,6 +392,7 @@ class Controller:
                 if current_path is not None:
                     current_path.unlink(missing_ok=True)
                 current_path = new_path
+                self._current_path = new_path           # for /api/current_image
 
                 # Motion clip after the still:
                 #   - live photo (image + paired motion video):   _play_live_photo
@@ -409,6 +414,7 @@ class Controller:
 
         if current_path is not None:
             current_path.unlink(missing_ok=True)
+        self._current_path = None
 
     def _play_video(self, asset: Asset) -> None:
         if self._video_player is None:
@@ -683,6 +689,11 @@ class Controller:
     @property
     def current_asset(self) -> Asset | None:
         return self._current_asset
+
+    def current_local_image(self) -> Path | None:
+        """Path to the file backing the current slide (collage composite or
+        prefetched preview), or None. Served by HTTP /api/current_image."""
+        return self._current_path
 
     @property
     def current_scene(self) -> str | None:

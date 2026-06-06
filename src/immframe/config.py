@@ -146,6 +146,10 @@ class CollageConfig:
     gap: int = 8                              # px gutter + outer margin
     background: str = "#101018"               # hex fill behind tiles / in gaps
     fit: str = "cover"                        # cover (fill + crop) | contain (letterbox)
+    # Per-tile caption: space-separated overlay fields baked onto each tile
+    # (e.g. "date location"). Empty = no per-tile text. Keys: caption, date,
+    # location, name, people, tags.
+    tile_text: str = ""
 
 
 @dataclass
@@ -316,6 +320,7 @@ class Config:
             gap=int(col_raw.get("gap", 8)),
             background=str(col_raw.get("background", "#101018")),
             fit=str(col_raw.get("fit", "cover")),
+            tile_text=str(col_raw.get("tile_text", "")),
         )
         if collage.layout not in ("auto", "grid", "golden_ratio"):
             raise ValueError(

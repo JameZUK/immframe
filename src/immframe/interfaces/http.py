@@ -27,6 +27,7 @@ Endpoints:
     POST /api/collage_min_tiles      {"value": int 2..12}
     POST /api/collage_max_tiles      {"value": int 2..12}
     GET  /api/image/<asset_id>       proxy preview JPEG from Immich
+    GET  /api/current_image          local file for the current slide (collages)
 
 All control endpoints require Basic auth when `config.control.http.auth=true`.
 Image proxying does too — it would be silly to gate the controls but leak
@@ -48,6 +49,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import __version__
+from ..collage import is_collage_id
 from ..config import HttpConfig
 from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
@@ -283,21 +285,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal error")
 
     def _dispatch_get(self) -> None:
-        if self.path == "/healthz":
+        # Strip any ?query (the SPA cache-busts /api/current_image with ?v=<id>).
+        path = self.path.split("?", 1)[0]
+        if path == "/healthz":
             return self._healthz()
         if not self._authed():
             return self._unauthorized()
-        if self.path in _STATIC:
-            return self._static(self.path)
-        if self.path == "/api/version":
+        if path in _STATIC:
+            return self._static(path)
+        if path == "/api/version":
             return self._version()
-        if self.path == "/api/state":
+        if path == "/api/state":
             return self._state()
-        m = _IMAGE_PATH_RE.match(self.path)
+        if path == "/api/current_image":
+            return self._current_image()
+        m = _IMAGE_PATH_RE.match(path)
         if m:
             return self._image(m.group(1))
         # POST-only paths return 405 here to be precise (vs blanket 404)
-        if self.path in _POST_PATHS:
+        if path in _POST_PATHS:
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "POST only")
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -391,7 +397,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._ctrl.collage_max_tiles = int(value)
             return self._state()
         # GET-only paths
-        if path in {"/api/version", "/api/state", "/healthz"}:
+        if path in {"/api/version", "/api/state", "/healthz", "/api/current_image"}:
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "GET only")
         if _IMAGE_PATH_RE.match(path):
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "GET only")
@@ -419,6 +425,9 @@ class _Handler(BaseHTTPRequestHandler):
                 "country": asset.geo.country,
                 "camera": camera or None,
                 "favorite": asset.favorite,
+                # Collages are synthetic — the UI must load them from
+                # /api/current_image, not the Immich image proxy.
+                "is_collage": is_collage_id(asset.id),
             }
         self._json(HTTPStatus.OK, {
             "paused": c.paused,
@@ -454,6 +463,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _current_image(self) -> None:
+        """Serve the local file backing the current slide. This is the only
+        way to view a collage, whose synthetic id isn't a real Immich asset."""
+        path = self._ctrl.current_local_image()
+        if path is None:
+            raise _HttpError(HTTPStatus.NOT_FOUND, "no current image")
+        try:
+            data = path.read_bytes()
+        except OSError:
+            # Raced with the slide advancing (file just unlinked) — transient.
+            raise _HttpError(HTTPStatus.NOT_FOUND, "current image unavailable")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 

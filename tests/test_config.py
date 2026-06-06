@@ -333,6 +333,21 @@ immich:
     assert cfg.collage.min_tiles == 3
     assert cfg.collage.max_tiles == 6
     assert cfg.collage.fit == "cover"
+    assert cfg.collage.tile_text == ""
+
+
+def test_collage_tile_text_parsed(tmp_path: Path):
+    cfg = Config.load(
+        _write(tmp_path, "config.yaml", """
+immich:
+  url: https://immich.example
+  api_key: k
+collage:
+  enabled: true
+  tile_text: "date location"
+""")
+    )
+    assert cfg.collage.tile_text == "date location"
 
 
 def test_collage_enabled_overrides(tmp_path: Path):

@@ -44,10 +44,14 @@ class _StubController:
         self.collage_max_tiles = 6
         self.current_asset: Asset | None = None
         self.current_scene: str | None = None
+        self.current_image_path = None
         self.next_calls = 0
 
     def next(self) -> None:
         self.next_calls += 1
+
+    def current_local_image(self):
+        return self.current_image_path
 
 
 def _asset() -> Asset:
@@ -423,6 +427,70 @@ def test_collage_endpoint_requires_auth():
     with _server() as (base, _, _):
         r = requests.post(f"{base}/api/collage_enabled", json={"value": True}, timeout=2.0)
         assert r.status_code == 401
+
+
+def test_state_flags_collage_asset():
+    from immframe.collage import make_collage_asset
+    with _server() as (base, ctrl, _):
+        ctrl.current_asset = make_collage_asset("collage-3", "Random • 4 photos", 4)
+        body = requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()
+        assert body["current_asset"]["id"] == "collage-3"
+        assert body["current_asset"]["is_collage"] is True
+
+
+def test_state_real_asset_not_flagged_collage():
+    with _server() as (base, ctrl, _):
+        ctrl.current_asset = _asset()
+        body = requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()
+        assert body["current_asset"]["is_collage"] is False
+
+
+def test_current_image_404_when_none():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/api/current_image", timeout=2.0, auth=_auth())
+        assert r.status_code == 404
+
+
+def test_current_image_serves_local_file():
+    import os
+    import tempfile
+    from pathlib import Path
+    with _server() as (base, ctrl, _):
+        fd, p = tempfile.mkstemp(suffix=".jpg")
+        os.write(fd, b"\xff\xd8COLLAGEBYTES")
+        os.close(fd)
+        ctrl.current_image_path = Path(p)
+        try:
+            r = requests.get(f"{base}/api/current_image", timeout=2.0, auth=_auth())
+            assert r.status_code == 200
+            assert r.headers["Content-Type"] == "image/jpeg"
+            assert r.content == b"\xff\xd8COLLAGEBYTES"
+        finally:
+            os.unlink(p)
+
+
+def test_current_image_requires_auth():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/api/current_image", timeout=2.0)
+        assert r.status_code == 401
+
+
+def test_current_image_ignores_cache_bust_query():
+    """The SPA appends ?v=<id> — the route must still match."""
+    import os
+    import tempfile
+    from pathlib import Path
+    with _server() as (base, ctrl, _):
+        fd, p = tempfile.mkstemp(suffix=".jpg")
+        os.write(fd, b"\xff\xd8Q")
+        os.close(fd)
+        ctrl.current_image_path = Path(p)
+        try:
+            r = requests.get(f"{base}/api/current_image?v=collage-7", timeout=2.0, auth=_auth())
+            assert r.status_code == 200
+            assert r.content == b"\xff\xd8Q"
+        finally:
+            os.unlink(p)
 
 
 # ── Allow-listing / RCE prevention ─────────────────────────────────────────

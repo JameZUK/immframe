@@ -188,6 +188,7 @@ display's native resolution.
 | `gap` | int | `8` | Pixels of gutter between tiles and as the outer margin. The `background` shows through. |
 | `background` | hex | `#101018` | Fill colour behind the tiles and in the gaps (`#rgb` or `#rrggbb`). |
 | `fit` | enum | `cover` | How each photo fills its tile. `cover` scales + centre-crops to fill the cell edge-to-edge (no gaps). `contain` letterboxes the photo within the cell against the `background`. |
+| `tile_text` | string | `""` | Space-separated fields to caption **each tile** with (e.g. `"date location"`). Keys: `caption`, `date`, `location`, `name`, `people`, `tags`. The caption is drawn small in the tile's bottom-left as white text with a black outline (legible on any photo). `""` = no per-tile text. Fields with no value for a given photo are skipped, so a scene collage where every photo shares the same place naturally shows the same short label. |
 
 `grid` lays out uniform rows×cols (cols ≈ √K); `golden_ratio` recursively
 splits the canvas at the golden ratio (0.618 : 0.382), always cutting the

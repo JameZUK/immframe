@@ -37,6 +37,44 @@ log = logging.getLogger(__name__)
 INV_PHI = 0.6180339887498949
 _MINOR = 1.0 - INV_PHI  # 0.381966…
 
+# Synthetic-asset id prefix for collages. The id is NOT a real Immich asset,
+# so the HTTP image proxy must serve the local composite instead (see
+# /api/current_image) rather than forwarding it to Immich.
+COLLAGE_ID_PREFIX = "collage-"
+
+
+def is_collage_id(asset_id: str) -> bool:
+    return bool(asset_id) and asset_id.startswith(COLLAGE_ID_PREFIX)
+
+
+# NotoSans, vendored with the pi3d viewer — reused for per-tile captions.
+_FONT_PATH = Path(__file__).parent / "viewer" / "data" / "fonts" / "NotoSans-Regular.ttf"
+
+# Fields a per-tile caption can show (mirrors the viewer's overlay keys).
+TILE_TEXT_KEYS = ("caption", "date", "location", "name", "people", "tags")
+
+
+def asset_caption(asset, fields: list[str], *, date_fmt: str = "%b %Y") -> str:
+    """Build a one-line per-tile caption from an Asset and a list of field
+    keys (in order). Skips fields with no value; joins with ' · '."""
+    parts: list[str] = []
+    for f in fields:
+        if f == "caption" and asset.caption:
+            parts.append(asset.caption)
+        elif f == "date" and asset.taken_at is not None:
+            parts.append(asset.taken_at.strftime(date_fmt))
+        elif f == "location":
+            loc = ", ".join(p for p in (asset.geo.city, asset.geo.state, asset.geo.country) if p)
+            if loc:
+                parts.append(loc)
+        elif f == "name" and asset.original_file_name:
+            parts.append(asset.original_file_name)
+        elif f == "people" and asset.people:
+            parts.append(", ".join(asset.people))
+        elif f == "tags" and asset.tag_names:
+            parts.append(", ".join(asset.tag_names))
+    return " · ".join(parts)
+
 
 @dataclass(frozen=True)
 class Rect:
@@ -144,6 +182,46 @@ def parse_hex_color(s: str) -> tuple[int, int, int]:
 
 
 # ── Compositing ─────────────────────────────────────────────────────────────
+def _get_font(size: int, cache: dict):
+    if size in cache:
+        return cache[size]
+    from PIL import ImageFont
+    try:
+        font = ImageFont.truetype(str(_FONT_PATH), size)
+    except Exception as e:                             # noqa: BLE001
+        log.debug("collage caption font load failed: %s", e)
+        font = None
+    cache[size] = font
+    return font
+
+
+def _truncate(draw, text: str, font, max_w: float) -> str:
+    """Trim `text` (appending an ellipsis) until it fits `max_w` pixels."""
+    if draw.textlength(text, font=font) <= max_w:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_w:
+        text = text[:-1]
+    return (text + "…") if text else ""
+
+
+def _draw_tile_caption(draw, text: str, rect: Rect, base_fs: int, cache: dict) -> None:
+    fs = max(12, min(base_fs, round(rect.h * 0.16)))   # shrink for small tiles
+    font = _get_font(fs, cache)
+    if font is None:
+        return
+    margin = max(4, fs // 3)
+    text = _truncate(draw, text, font, rect.w - 2 * margin)
+    if not text:
+        return
+    x = round(rect.x) + margin
+    y = round(rect.y + rect.h) - fs - margin
+    # White text with a black outline reads on any photo, no backing strip.
+    draw.text(
+        (x, y), text, font=font, fill=(255, 255, 255),
+        stroke_width=max(1, fs // 12), stroke_fill=(0, 0, 0),
+    )
+
+
 def render_collage(
     image_paths: list[Path],
     is_portrait: list[bool],
@@ -154,13 +232,15 @@ def render_collage(
     background: str,
     fit: str,
     layout: str,
+    captions: list[str] | None = None,
 ) -> bool:
     """Composite `image_paths` into one JPEG at `dest`. Returns True on success.
 
     A tile that fails to load is left as background rather than aborting the
-    whole collage. Writes atomically (tmp + rename).
+    whole collage. When `captions` is given (one string per image), each tile
+    gets a small outlined caption in its bottom-left corner. Writes atomically.
     """
-    from PIL import Image, ImageOps                    # lazy: keep geometry PIL-free
+    from PIL import Image, ImageOps, ImageDraw         # lazy: keep geometry PIL-free
 
     n = len(image_paths)
     if n < 2:
@@ -189,6 +269,14 @@ def render_collage(
                     )
         except Exception as e:                         # noqa: BLE001 — one bad tile ≠ dead collage
             log.warning("collage tile load failed for %s: %s", path, e)
+
+    if captions and any(captions):
+        draw = ImageDraw.Draw(canvas)
+        base_fs = max(14, round(canvas_size[1] * 0.024))
+        font_cache: dict = {}
+        for cap, rect in zip(captions, rects):
+            if cap:
+                _draw_tile_caption(draw, cap, rect, base_fs, font_cache)
 
     tmp = dest.with_name(dest.name + ".part")
     try:

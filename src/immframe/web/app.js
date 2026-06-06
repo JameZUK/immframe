@@ -102,8 +102,12 @@ function render(state) {
     const a = state.current_asset;
     if (a) {
       if (a.id !== lastAssetId) {
-        // Cache-bust by ID change; the server already sends Cache-Control: no-store
-        $("current-image").src = `/api/image/${encodeURIComponent(a.id)}`;
+        // Cache-bust by ID change; the server already sends Cache-Control: no-store.
+        // Collages are synthetic (no Immich asset) — load the composited file
+        // from /api/current_image instead of the image proxy.
+        $("current-image").src = a.is_collage
+          ? `/api/current_image?v=${encodeURIComponent(a.id)}`
+          : `/api/image/${encodeURIComponent(a.id)}`;
         $("current-image").style.display = "";
         $("image-placeholder").style.display = "none";
         lastAssetId = a.id;

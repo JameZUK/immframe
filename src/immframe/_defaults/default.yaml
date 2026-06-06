@@ -48,6 +48,8 @@ collage:
   gap: 8                                   # px gutter between tiles + outer margin
   background: "#101018"                    # hex fill shown behind tiles / in the gaps
   fit: cover                               # cover (fill + crop) | contain (letterbox)
+  tile_text: ""                            # per-tile caption fields, e.g. "date location"
+                                            # (keys: caption date location name people tags); "" = off
 
 viewer:
   # Carried through to viewer/display.py — see picframe wiki for the full
