@@ -138,6 +138,51 @@ video:
 
 ---
 
+## collage
+
+Tiles several photos into a single frame. Collage is a **presentation layer**,
+orthogonal to selection — it works on top of *any* `selection.default_mode`
+(random, album, people, …). When enabled, each "slide" is a composite of a
+random number of photos instead of a single image; the composite flows through
+the normal render path, so it still gets the mat / blur-edge / crossfade / text
+overlay treatment.
+
+The compositing happens in the prefetch worker (off the render thread), at the
+display's native resolution.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Turn collage mode on. |
+| `layout` | enum | `auto` | `grid`, `golden_ratio`, or `auto`. **auto** picks per collage: golden_ratio for ≤3 tiles or a mixed portrait/landscape set, grid for perfect-square counts (4, 9) or a uniform-orientation set. |
+| `min_tiles` | int | `3` | Lower bound (≥ 2) of the random tile count drawn per collage. |
+| `max_tiles` | int | `6` | Upper bound (≤ 12, ≥ `min_tiles`). Each collage uses a random count in `[min_tiles, max_tiles]`. Set both equal for a fixed count. |
+| `gap` | int | `8` | Pixels of gutter between tiles and as the outer margin. The `background` shows through. |
+| `background` | hex | `#101018` | Fill colour behind the tiles and in the gaps (`#rgb` or `#rrggbb`). |
+| `fit` | enum | `cover` | How each photo fills its tile. `cover` scales + centre-crops to fill the cell edge-to-edge (no gaps). `contain` letterboxes the photo within the cell against the `background`. |
+
+`grid` lays out uniform rows×cols (cols ≈ √K); `golden_ratio` recursively
+splits the canvas at the golden ratio (0.618 : 0.382), always cutting the
+longer side, for an organic magazine/Fibonacci-spiral look with one larger
+"hero" tile.
+
+Videos in a selection batch contribute their **poster still** as a tile (collage
+is image-only — no playback). The overlay / control-plane `current_asset`
+reports a generic label like `Random • 4 photos` (or the active scene/person
+name + count) since a collage has no single source asset.
+
+```yaml
+collage:
+  enabled: true
+  layout: auto
+  min_tiles: 3
+  max_tiles: 6
+  gap: 8
+  background: "#101018"
+  fit: cover
+```
+
+---
+
 ## viewer
 
 Carries the picframe-style viewer config straight through to the vendored

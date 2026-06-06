@@ -1,0 +1,226 @@
+"""Collage composition — tile K photos into one image.
+
+Collage is a *presentation* layer, orthogonal to selection mode: the prefetch
+worker pulls K assets from whatever selector is active, downloads them, and
+composites them here into a single JPEG that flows through the normal render
+path (so it gets mat / blur-edges / crossfade / overlay for free, and the
+viewer never knows it's a collage).
+
+This module has two halves:
+
+1. **Pure geometry** (`grid_rects`, `golden_rects`, `choose_layout`) — no PIL,
+   no I/O, trivially unit-testable. They turn a tile count + canvas size into a
+   list of `Rect`s.
+2. **Compositing** (`render_collage`) — lazily imports PIL, loads each source,
+   cover-crops (or letterboxes) it into its rect, and writes the JPEG.
+
+Two layout algorithms:
+- ``grid``         — uniform rows×cols (cols ≈ √K), clean and predictable.
+- ``golden_ratio`` — recursive φ-weighted split (0.618 : 0.382), always cutting
+  the longer side, giving the organic magazine/Fibonacci-spiral look.
+
+``layout: auto`` picks between them from the tile count and orientation mix.
+"""
+from __future__ import annotations
+
+import logging
+import math
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# 1/φ. The placed image in each golden split takes the *minor* section
+# (1 - INV_PHI = 0.382) and we keep subdividing the major remainder, so the
+# final tile is the largest — the recognisable golden-spiral hierarchy.
+INV_PHI = 0.6180339887498949
+_MINOR = 1.0 - INV_PHI  # 0.381966…
+
+
+@dataclass(frozen=True)
+class Rect:
+    """A tile rectangle in pixels (floats; rounded at paste time)."""
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+# ── Pure geometry ───────────────────────────────────────────────────────────
+def grid_rects(n: int, w: float, h: float, gap: float) -> list[Rect]:
+    """Uniform grid. `gap` is used both as the outer margin and the gutter, so
+    tiles sit inside a clean border. The final (partial) row's tiles widen to
+    fill the canvas width."""
+    if n <= 0:
+        return []
+    rows = max(1, round(math.sqrt(n)))
+    cols = math.ceil(n / rows)
+    cell_h = (h - gap * (rows + 1)) / rows
+    rects: list[Rect] = []
+    placed = 0
+    for r in range(rows):
+        remaining = n - placed
+        if remaining <= 0:
+            break
+        tiles_in_row = min(cols, remaining)
+        cell_w = (w - gap * (tiles_in_row + 1)) / tiles_in_row
+        y = gap + r * (cell_h + gap)
+        for c in range(tiles_in_row):
+            x = gap + c * (cell_w + gap)
+            rects.append(Rect(x, y, cell_w, cell_h))
+            placed += 1
+    return rects
+
+
+def golden_rects(n: int, w: float, h: float, gap: float) -> list[Rect]:
+    """φ-weighted binary split. `gap` is the outer margin and the gutter
+    between each split. Always cuts the rectangle's longer side so no tile
+    degenerates into a sliver."""
+    if n <= 0:
+        return []
+    x, y = gap, gap
+    cw, ch = w - 2 * gap, h - 2 * gap
+    rects: list[Rect] = []
+    for _ in range(n - 1):
+        if cw >= ch:                                   # split left | right
+            minor = (cw - gap) * _MINOR
+            rects.append(Rect(x, y, minor, ch))
+            x += minor + gap
+            cw -= minor + gap
+        else:                                          # split top | bottom
+            minor = (ch - gap) * _MINOR
+            rects.append(Rect(x, y, cw, minor))
+            y += minor + gap
+            ch -= minor + gap
+    rects.append(Rect(x, y, cw, ch))                   # remainder = hero tile
+    return rects
+
+
+def is_perfect_square(n: int) -> bool:
+    if n < 0:
+        return False
+    r = int(round(math.sqrt(n)))
+    return r * r == n
+
+
+def choose_layout(configured: str, n: int, is_portrait: list[bool]) -> str:
+    """Resolve ``auto`` to a concrete layout from the tile count + orientation
+    mix; pass an explicit ``grid``/``golden_ratio`` through unchanged.
+
+    Auto rule: K≤3 → golden; perfect square (4, 9, …) → grid; mixed
+    portrait/landscape → golden; otherwise grid.
+    """
+    if configured in ("grid", "golden_ratio"):
+        return configured
+    if n <= 3:
+        return "golden_ratio"
+    if is_perfect_square(n):
+        return "grid"
+    mixed = bool(is_portrait) and any(is_portrait) and not all(is_portrait)
+    if mixed:
+        return "golden_ratio"
+    return "grid"
+
+
+def layout_rects(layout: str, n: int, w: float, h: float, gap: float) -> list[Rect]:
+    if layout == "grid":
+        return grid_rects(n, w, h, gap)
+    return golden_rects(n, w, h, gap)
+
+
+# ── Colour helper (shared with config validation) ───────────────────────────
+def parse_hex_color(s: str) -> tuple[int, int, int]:
+    """Parse ``#rgb`` / ``#rrggbb`` (with or without ``#``) to an RGB tuple."""
+    t = str(s).strip().lstrip("#")
+    if len(t) == 3:
+        t = "".join(c * 2 for c in t)
+    if len(t) != 6:
+        raise ValueError(f"invalid hex color {s!r} (expected #rgb or #rrggbb)")
+    try:
+        return (int(t[0:2], 16), int(t[2:4], 16), int(t[4:6], 16))
+    except ValueError as e:
+        raise ValueError(f"invalid hex color {s!r}: {e}") from e
+
+
+# ── Compositing ─────────────────────────────────────────────────────────────
+def render_collage(
+    image_paths: list[Path],
+    is_portrait: list[bool],
+    dest: Path,
+    *,
+    canvas_size: tuple[int, int],
+    gap: int,
+    background: str,
+    fit: str,
+    layout: str,
+) -> bool:
+    """Composite `image_paths` into one JPEG at `dest`. Returns True on success.
+
+    A tile that fails to load is left as background rather than aborting the
+    whole collage. Writes atomically (tmp + rename).
+    """
+    from PIL import Image, ImageOps                    # lazy: keep geometry PIL-free
+
+    n = len(image_paths)
+    if n < 2:
+        return False
+    chosen = choose_layout(layout, n, is_portrait)
+    rects = layout_rects(chosen, n, canvas_size[0], canvas_size[1], gap)
+    canvas = Image.new("RGB", canvas_size, parse_hex_color(background))
+
+    for path, rect in zip(image_paths, rects):
+        cell = (max(1, round(rect.w)), max(1, round(rect.h)))
+        ox, oy = round(rect.x), round(rect.y)
+        try:
+            with Image.open(path) as im:
+                im.draft("RGB", cell)                  # fast JPEG downscale near target size
+                im = ImageOps.exif_transpose(im) or im
+                im = im.convert("RGB")
+                if fit == "cover":
+                    tile = ImageOps.fit(im, cell, method=Image.BICUBIC, centering=(0.5, 0.5))
+                    canvas.paste(tile, (ox, oy))
+                else:                                  # contain: letterbox within the cell
+                    thumb = im.copy()
+                    thumb.thumbnail(cell, Image.BICUBIC)
+                    canvas.paste(
+                        thumb,
+                        (ox + (cell[0] - thumb.width) // 2, oy + (cell[1] - thumb.height) // 2),
+                    )
+        except Exception as e:                         # noqa: BLE001 — one bad tile ≠ dead collage
+            log.warning("collage tile load failed for %s: %s", path, e)
+
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        canvas.save(tmp, "JPEG", quality=90)
+        os.replace(tmp, dest)
+    except OSError as e:
+        log.warning("collage save failed: %s", e)
+        Path(tmp).unlink(missing_ok=True)
+        return False
+    log.info("collage: %d tiles, layout=%s, %dx%d", n, chosen, canvas_size[0], canvas_size[1])
+    return True
+
+
+def make_collage_asset(stem: str, label: str, count: int):
+    """A synthetic `Asset` standing in for the composited collage so it flows
+    through the render path and surfaces a generic label in overlay / state."""
+    from .immich.models import Asset, AssetKind, GeoInfo
+    return Asset(
+        id=stem,
+        kind=AssetKind.IMAGE,
+        original_file_name=label,
+        mime_type="image/jpeg",
+        width=0,
+        height=0,
+        taken_at=None,
+        geo=GeoInfo(None, None, None, None, None),
+        camera_make=None,
+        camera_model=None,
+        title=None,
+        caption=label,
+        tag_names=(),
+        people=(),
+        favorite=False,
+        live_photo_video_id=None,
+    )

@@ -192,6 +192,19 @@ def test_current_scene_none_outside_scene_mode():
     assert c.current_scene is None
 
 
+def test_collage_label_uses_mode_and_count():
+    c = _controller()
+    assert c._collage_label(4) == "Random • 4 photos"
+    assert c._collage_label(1) == "Random • 1 photo"
+
+
+def test_collage_label_uses_scene_when_present():
+    c = _controller()
+    c.selection_mode = "scene"
+    c._selector._current_scene = "beach"
+    assert c._collage_label(3) == "beach • 3 photos"
+
+
 def test_current_scene_delegates_to_scene_selector():
     c = _controller()
     c.selection_mode = "scene"

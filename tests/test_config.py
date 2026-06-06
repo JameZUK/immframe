@@ -320,6 +320,67 @@ video:
     assert cfg.video.fullscreen is True
 
 
+def test_collage_defaults_disabled(tmp_path: Path):
+    cfg = Config.load(
+        _write(tmp_path, "config.yaml", """
+immich:
+  url: https://immich.example
+  api_key: k
+""")
+    )
+    assert cfg.collage.enabled is False
+    assert cfg.collage.layout == "auto"
+    assert cfg.collage.min_tiles == 3
+    assert cfg.collage.max_tiles == 6
+    assert cfg.collage.fit == "cover"
+
+
+def test_collage_enabled_overrides(tmp_path: Path):
+    cfg = Config.load(
+        _write(tmp_path, "config.yaml", """
+immich:
+  url: https://immich.example
+  api_key: k
+collage:
+  enabled: true
+  layout: golden_ratio
+  min_tiles: 4
+  max_tiles: 4
+  gap: 12
+  background: "#223344"
+  fit: contain
+""")
+    )
+    assert cfg.collage.enabled is True
+    assert cfg.collage.layout == "golden_ratio"
+    assert cfg.collage.min_tiles == 4 and cfg.collage.max_tiles == 4
+    assert cfg.collage.gap == 12
+    assert cfg.collage.background == "#223344"
+    assert cfg.collage.fit == "contain"
+
+
+@pytest.mark.parametrize("block,match", [
+    ("layout: spiral", "collage.layout"),
+    ("fit: stretch", "collage.fit"),
+    ("min_tiles: 1", "collage.min_tiles"),
+    ("min_tiles: 5\n  max_tiles: 3", "collage.max_tiles"),
+    ("max_tiles: 99", "collage.max_tiles"),
+    ("gap: -3", "collage.gap"),
+    ('background: "zzz"', "hex color"),
+])
+def test_collage_invalid_values_raise(tmp_path: Path, block: str, match: str):
+    cfg_yaml = _write(tmp_path, "config.yaml", f"""
+immich:
+  url: https://immich.example
+  api_key: k
+collage:
+  enabled: true
+  {block}
+""")
+    with pytest.raises(ValueError, match=match):
+        Config.load(cfg_yaml)
+
+
 def test_video_poster_defaults(tmp_path: Path):
     cfg_yaml = _write(
         tmp_path,

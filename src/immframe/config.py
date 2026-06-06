@@ -135,6 +135,20 @@ class VideoConfig:
 
 
 @dataclass
+class CollageConfig:
+    """Tile several photos into one frame. A presentation layer that works on
+    top of ANY selection mode (random/album/people/…)."""
+    enabled: bool = False
+    # "auto" picks grid vs golden_ratio from tile count + orientation mix.
+    layout: str = "auto"                      # auto | grid | golden_ratio
+    min_tiles: int = 3                        # random count per collage, in
+    max_tiles: int = 6                        #   [min_tiles, max_tiles]
+    gap: int = 8                              # px gutter + outer margin
+    background: str = "#101018"               # hex fill behind tiles / in gaps
+    fit: str = "cover"                        # cover (fill + crop) | contain (letterbox)
+
+
+@dataclass
 class ViewerConfig:
     """Carries the viewer-block YAML through to picframe's vendored viewer
     untouched — see picframe wiki for the full key reference."""
@@ -174,6 +188,7 @@ class Config:
     video: VideoConfig
     viewer: ViewerConfig
     control: ControlConfig
+    collage: CollageConfig = field(default_factory=CollageConfig)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":
@@ -208,7 +223,7 @@ class Config:
 
     @classmethod
     def _build(cls, data: dict[str, Any]) -> "Config":
-        known = {"immich", "selection", "video", "viewer", "control"}
+        known = {"immich", "selection", "video", "viewer", "control", "collage"}
         unknown = set(data.keys()) - known
         if unknown:
             raise ValueError(f"Unknown top-level config keys: {sorted(unknown)}")
@@ -292,6 +307,36 @@ class Config:
 
         viewer = ViewerConfig(raw=dict(data.get("viewer", {})))
 
+        col_raw = data.get("collage", {})
+        collage = CollageConfig(
+            enabled=bool(col_raw.get("enabled", False)),
+            layout=str(col_raw.get("layout", "auto")),
+            min_tiles=int(col_raw.get("min_tiles", 3)),
+            max_tiles=int(col_raw.get("max_tiles", 6)),
+            gap=int(col_raw.get("gap", 8)),
+            background=str(col_raw.get("background", "#101018")),
+            fit=str(col_raw.get("fit", "cover")),
+        )
+        if collage.layout not in ("auto", "grid", "golden_ratio"):
+            raise ValueError(
+                f"collage.layout must be 'auto', 'grid' or 'golden_ratio'; got {collage.layout!r}"
+            )
+        if collage.fit not in ("cover", "contain"):
+            raise ValueError(f"collage.fit must be 'cover' or 'contain'; got {collage.fit!r}")
+        if collage.min_tiles < 2:
+            raise ValueError(f"collage.min_tiles must be >= 2; got {collage.min_tiles}")
+        if collage.max_tiles < collage.min_tiles:
+            raise ValueError(
+                f"collage.max_tiles ({collage.max_tiles}) must be >= "
+                f"collage.min_tiles ({collage.min_tiles})"
+            )
+        if collage.max_tiles > 12:
+            raise ValueError(f"collage.max_tiles must be <= 12; got {collage.max_tiles}")
+        if collage.gap < 0:
+            raise ValueError(f"collage.gap must be >= 0; got {collage.gap}")
+        from .collage import parse_hex_color
+        parse_hex_color(collage.background)              # validate; raises ValueError
+
         ctrl_raw = data.get("control", {})
         mqtt_raw = ctrl_raw.get("mqtt", {})
         http_raw = ctrl_raw.get("http", {})
@@ -314,4 +359,7 @@ class Config:
             ),
         )
 
-        return cls(immich=immich, selection=selection, video=video, viewer=viewer, control=control)
+        return cls(
+            immich=immich, selection=selection, video=video,
+            viewer=viewer, control=control, collage=collage,
+        )

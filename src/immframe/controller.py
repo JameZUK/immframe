@@ -222,6 +222,11 @@ class Controller:
             # overlay actually shows it. Re-read each fetch so a runtime
             # show_text toggle is honored.
             wants_ocr=lambda: "ocr" in self._show_text_keys,
+            # When collage is on, the worker emits one composited image per
+            # item (instead of one asset); it flows through the render path
+            # unchanged. Label reflects the active selection + tile count.
+            collage=config.collage if config.collage.enabled else None,
+            collage_label=self._collage_label,
         )
 
         # Lazily constructed in start() so module import doesn't pull pi3d/mpv
@@ -265,6 +270,12 @@ class Controller:
         # Ping is informational only — don't block startup if Immich is slow.
         if not self._client.ping():
             log.warning("Immich ping failed at startup; will retry on first prefetch.")
+
+        # Composite collages at the real display resolution now pi3d knows it.
+        if self._config.collage.enabled:
+            self._prefetch.set_collage_canvas(
+                self._viewer.display_width, self._viewer.display_height
+            )
 
         self._prefetch.start()
 
@@ -668,6 +679,13 @@ class Controller:
         carry a label."""
         sel = self._selector
         return getattr(sel, "current_scene", None)
+
+    def _collage_label(self, n: int) -> str:
+        """Generic label for a collage's synthetic asset, e.g. 'beach • 4
+        photos' or 'Random • 4 photos'. Called from the prefetch thread."""
+        scene = self.current_scene
+        base = scene if scene else self._selection_mode.capitalize()
+        return f"{base} • {n} photo{'s' if n != 1 else ''}"
 
     # ── Internals ───────────────────────────────────────────────────────
     def _sync_to_viewer(self) -> None:

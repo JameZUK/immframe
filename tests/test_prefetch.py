@@ -230,6 +230,54 @@ def test_ocr_failure_does_not_drop_the_item():
     assert item[1].id == "x" and item[2] is None
 
 
+def test_collage_mode_produces_one_composite_item():
+    """With collage enabled, K assets become a SINGLE composited queue item
+    carrying a synthetic asset (not one item per asset)."""
+    from immframe.config import CollageConfig
+    selector = MagicMock()
+    selector.next_batch.side_effect = lambda n: [_a("a"), _a("b"), _a("c")][:n]
+    client = _client_writing_bytes()
+    cfg = CollageConfig(enabled=True, min_tiles=3, max_tiles=3, layout="grid", gap=2)
+    w = PrefetchWorker(
+        selector, client, queue_size=3, empty_backoff_s=0.01,
+        collage=cfg, collage_label=lambda n: f"Test • {n}",
+    )
+    w.set_collage_canvas(120, 90)
+    w.start()
+    try:
+        item = w.next(timeout=3.0)
+        assert item is not None
+        path, asset, ocr = item
+        # JPEG magic — a real composite was written (tiles were unreadable
+        # bytes, so they fall back to background, but the canvas is valid).
+        magic = path.read_bytes()[:2]
+    finally:
+        w.stop(timeout=2.0)
+    assert ocr is None
+    assert asset.id.startswith("collage-")
+    assert asset.caption == "Test • 3"
+    assert magic == b"\xff\xd8"
+
+
+def test_collage_skips_when_too_few_sources():
+    """Fewer than two usable sources → no collage emitted (worker backs off)."""
+    from immframe.config import CollageConfig
+    selector = MagicMock()
+    selector.next_batch.side_effect = lambda n: [_a("solo")]
+    client = _client_writing_bytes()
+    cfg = CollageConfig(enabled=True, min_tiles=3, max_tiles=3, layout="grid")
+    w = PrefetchWorker(
+        selector, client, queue_size=3, empty_backoff_s=0.01, collage=cfg,
+    )
+    w.set_collage_canvas(120, 90)
+    w.start()
+    try:
+        item = w.next(timeout=0.5)
+    finally:
+        w.stop(timeout=2.0)
+    assert item is None
+
+
 def test_stop_is_idempotent():
     selector = MagicMock()
     selector.next_batch.return_value = []

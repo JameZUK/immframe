@@ -37,6 +37,18 @@ video:
   fullscreen: false                        # let the compositor fullscreen MPV (true only on non-kiosk desktops)
   max_play_s: 60.0                         # hard cap per video play (sec)
 
+collage:
+  # Tile several photos into one frame. Works on top of ANY selection mode.
+  enabled: false
+  layout: auto                             # auto | grid | golden_ratio
+                                            # auto: golden for ≤3 / mixed orientation,
+                                            # grid for square counts (4, 9), else grid
+  min_tiles: 3                             # random tile count per collage, in
+  max_tiles: 6                             #   [min_tiles, max_tiles] (2..12)
+  gap: 8                                   # px gutter between tiles + outer margin
+  background: "#101018"                    # hex fill shown behind tiles / in the gaps
+  fit: cover                               # cover (fill + crop) | contain (letterbox)
+
 viewer:
   # Carried through to viewer/display.py — see picframe wiki for the full
   # key reference. Only the most common ones listed.
