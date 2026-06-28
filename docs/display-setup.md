@@ -172,9 +172,11 @@ chmod +x ~/.config/labwc/autostart
     <titlebar show="no"/>
   </theme>
   <windowRules>
-    <!-- Make immframe (and any pi3d-SDL2 window) fullscreen + undecorated. -->
-    <windowRule identifier="*" matchOnce="false">
-      <ignoreFocusRequest>false</ignoreFocusRequest>
+    <!-- Make immframe (and any pi3d-SDL2 window) fullscreen + undecorated.
+         ignoreConfigureRequest="yes" makes labwc ignore client resize
+         requests, so MPV's per-file window resize can't drop videos out of
+         fullscreen — see the note below. -->
+    <windowRule identifier="*" matchOnce="false" ignoreConfigureRequest="yes">
       <action name="ToggleFullscreen"/>
     </windowRule>
   </windowRules>
@@ -185,6 +187,14 @@ chmod +x ~/.config/labwc/autostart
 fine on a kiosk that only ever runs one or two apps. If you'd rather
 target only immframe / MPV specifically, replace `"*"` with the actual
 identifier shown by `swaymsg -t get_tree` or labwc's debug output.)
+
+> **Why `ignoreConfigureRequest="yes"`.** immframe reuses one persistent MPV
+> instance across every clip. By default MPV resizes its window to each new
+> video's native resolution; because `ToggleFullscreen` only fires once (on
+> map), that per-file resize drops the 2nd clip onward out of fullscreen — the
+> "tiny video" symptom. Telling labwc to ignore client resize/move requests
+> makes the resize a no-op so the fullscreen geometry sticks, regardless of
+> the installed mpv version.
 
 > **Important — leave `video.fullscreen: false` (the default).** Because
 > this rule fullscreens *every* window, MPV must **not** also request

@@ -5,6 +5,17 @@
 
   Makes every window fullscreen + undecorated — appropriate for a
   kiosk that only ever runs the slideshow + occasional MPV video.
+
+  ignoreConfigureRequest="yes" is what keeps videos full-screen. immframe
+  reuses ONE persistent MPV instance across every clip (loadfile … replace).
+  By default MPV resizes its window to each new video's native resolution,
+  which on a plain ToggleFullscreen rule drops the window out of fullscreen
+  for the 2nd clip onward (the "tiny video" symptom) — ToggleFullscreen only
+  fires once, on map, so nothing re-fullscreens it. Telling labwc to ignore
+  client-initiated resize/move requests makes that per-file resize a no-op, so
+  the compositor-owned fullscreen geometry sticks. This fixes it regardless of
+  the installed mpv version (mpv's own `auto-window-resize=no` only exists in
+  mpv >= 0.36; Bookworm ships 0.35.x).
 -->
 <labwc_config>
   <core>
@@ -15,7 +26,7 @@
     <titlebar show="no"/>
   </theme>
   <windowRules>
-    <windowRule identifier="*" matchOnce="false">
+    <windowRule identifier="*" matchOnce="false" ignoreConfigureRequest="yes">
       <action name="ToggleFullscreen"/>
     </windowRule>
   </windowRules>

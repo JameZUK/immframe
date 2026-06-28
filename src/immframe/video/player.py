@@ -68,11 +68,16 @@ class VideoPlayer:
         # small. Pinning the window size off means the compositor-owned
         # fullscreen geometry sticks for the lifetime of the instance.
         #
-        # NOTE: `auto-window-resize` is NOT passed in the constructor below.
-        # The option only exists in mpv >= 0.36; Raspberry Pi OS Bookworm
-        # ships libmpv 0.35.x. python-mpv raises if the constructor is handed
-        # an option libmpv doesn't know — and because Controller.start() wraps
-        # VideoPlayer() in a broad try/except, that one unknown option would
+        # NOTE: the per-file resize that causes "tiny video" is fixed primarily
+        # on the compositor side — examples/labwc/rc.xml sets
+        # ignoreConfigureRequest="yes" so labwc ignores MPV's per-file window
+        # resize requests and the fullscreen geometry sticks for ALL mpv
+        # versions. The `auto-window-resize=no` below is a belt-and-braces
+        # second line of defense (and helps on non-labwc compositors). It is
+        # NOT passed in the constructor: the option only exists in mpv >= 0.36
+        # (Bookworm ships libmpv 0.35.x), and python-mpv raises if the
+        # constructor is handed an option libmpv doesn't know — which, because
+        # Controller.start() wraps VideoPlayer() in a broad try/except, would
         # silently disable video for the entire session. We set it *after*
         # construction instead (see below), where an unsupported option is a
         # logged no-op rather than fatal.
