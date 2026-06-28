@@ -67,13 +67,21 @@ class VideoPlayer:
         # existing window, so that video (and any after it that resize) play
         # small. Pinning the window size off means the compositor-owned
         # fullscreen geometry sticks for the lifetime of the instance.
+        #
+        # NOTE: `auto-window-resize` is NOT passed in the constructor below.
+        # The option only exists in mpv >= 0.36; Raspberry Pi OS Bookworm
+        # ships libmpv 0.35.x. python-mpv raises if the constructor is handed
+        # an option libmpv doesn't know — and because Controller.start() wraps
+        # VideoPlayer() in a broad try/except, that one unknown option would
+        # silently disable video for the entire session. We set it *after*
+        # construction instead (see below), where an unsupported option is a
+        # logged no-op rather than fatal.
         mpv_opts: dict = dict(
             vo=vo,
             mute=mute,
             keep_open="no",
             video_unscaled="no",
             keepaspect="yes",
-            auto_window_resize="no",
             panscan="1.0" if fit == "cover" else "0.0",
             fullscreen="yes" if fullscreen else "no",
             osc=False,
@@ -84,6 +92,18 @@ class VideoPlayer:
         if rotate != "auto":
             mpv_opts["video_rotate"] = rotate
         self._mpv = mpv.MPV(**mpv_opts)
+
+        # Set version-fragile options defensively, after the handle exists, so
+        # an old libmpv that lacks one degrades to a no-op instead of taking
+        # the whole player down with it (see the NOTE above).
+        try:
+            self._mpv["auto-window-resize"] = "no"
+        except Exception as e:
+            log.info(
+                "mpv lacks 'auto-window-resize' (libmpv < 0.36?) — skipping; "
+                "later videos may play small under labwc: %s",
+                e,
+            )
 
         # Diagnostics: log what MPV reports so video issues are debuggable
         # from the systemd journal alone.
