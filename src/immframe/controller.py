@@ -352,6 +352,21 @@ class Controller:
         log.info("signal received, stopping")
         self._stop_evt.set()
 
+    def request_restart(self) -> None:
+        """Stop the loop so the supervisor relaunches us with the config on
+        disk (see start._run_slideshow). Called from the HTTP thread."""
+        log.info("restart requested (new configuration)")
+        self._restart_requested = True
+        self._stop_evt.set()
+
+    @property
+    def restart_requested(self) -> bool:
+        return getattr(self, "_restart_requested", False)
+
+    @property
+    def config(self) -> Config:
+        return self._config
+
     def loop(self) -> None:
         viewer = self._viewer
         if viewer is None:

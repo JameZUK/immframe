@@ -30,6 +30,9 @@ Endpoints:
     POST /api/collage_max_tiles      {"value": int 2..12}
     GET  /api/image/<asset_id>       proxy preview JPEG from Immich
     GET  /api/current_image          local file for the current slide (collages)
+    GET  /api/config                 user config.yaml (secrets masked) + form schema
+    POST /api/config                 {"config": {...}} | {"yaml": "..."}, optional "restart": true
+    POST /api/restart                stop so the supervisor relaunches with the config on disk
 
 All control endpoints require Basic auth when `config.control.http.auth=true`.
 Image proxying does too — it would be silly to gate the controls but leak
@@ -51,8 +54,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import __version__
+from .. import config_edit
 from ..collage import is_collage_id
-from ..config import SELECTION_MODES, HttpConfig
+from ..config import SELECTION_MODES, Config, HttpConfig
 from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
 
@@ -79,8 +83,10 @@ _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # built from user input.
 _STATIC: dict[str, tuple[str, str]] = {
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/config": ("config.html", "text/html; charset=utf-8"),
     "/static/app.css": ("app.css", "text/css; charset=utf-8"),
     "/static/app.js": ("app.js", "application/javascript; charset=utf-8"),
+    "/static/config.js": ("config.js", "application/javascript; charset=utf-8"),
 }
 
 # Content types an HTML form can submit cross-origin without a preflight.
@@ -97,6 +103,8 @@ _POST_PATHS = frozenset({
     "/api/next",
     "/api/hide",
     "/api/favorite",
+    "/api/config",
+    "/api/restart",
     "/api/brightness",
     "/api/display_is_on",
     "/api/show_text",
@@ -308,6 +316,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._state()
         if path == "/api/current_image":
             return self._current_image()
+        if path == "/api/config":
+            return self._config_get()
         m = _IMAGE_PATH_RE.match(path)
         if m:
             return self._image(m.group(1))
@@ -363,6 +373,11 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/next":
             self._ctrl.next()
             return self._empty(HTTPStatus.ACCEPTED)
+        if path == "/api/config":
+            return self._config_post()
+        if path == "/api/restart":
+            self._schedule_restart()
+            return self._json(HTTPStatus.ACCEPTED, {"restarting": True})
         if path == "/api/hide":
             try:
                 result = self._ctrl.hide_current()
@@ -502,6 +517,76 @@ class _Handler(BaseHTTPRequestHandler):
             "pair_asset": self._asset_obj(getattr(c, "pair_asset", None)),
             "hidden_count": getattr(c, "hidden_count", 0),
         })
+
+    # ── Settings (config.yaml editor) ───────────────────────────────────
+    def _config_path(self) -> Path:
+        cfg = getattr(self._ctrl, "config", None)
+        path = getattr(cfg, "path", None) if cfg is not None else None
+        return Path(path) if path else Config.default_user_path()
+
+    def _config_get(self) -> None:
+        path = self._config_path()
+        try:
+            tree = config_edit.read_user_yaml(path)
+        except config_edit.ConfigEditError as e:
+            raise _HttpError(HTTPStatus.INTERNAL_SERVER_ERROR, str(e))
+        masked = config_edit.mask(tree)
+        try:
+            effective = config_edit.effective_values(config_edit.validate(tree))
+        except config_edit.ConfigEditError:
+            effective = {}                          # file on disk doesn't validate; form shows raw values
+        self._json(HTTPStatus.OK, {
+            "path": str(path),
+            "exists": path.exists(),
+            "config": masked,
+            "effective": effective,
+            "yaml": config_edit.to_yaml(masked),
+            "schema": config_edit.SCHEMA,
+            "playlist_entry_options": config_edit.PLAYLIST_ENTRY_OPTIONS,
+            "collage_entry_options": config_edit.COLLAGE_ENTRY_OPTIONS,
+            "modes": list(SELECTION_MODES),
+            "mask": config_edit.MASK,
+        })
+
+    def _config_post(self) -> None:
+        body = self._read_json(max_bytes=512 * 1024)
+        if not isinstance(body, dict):
+            raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'config': {...}} or {'yaml': '...'}")
+        path = self._config_path()
+        try:
+            current = config_edit.read_user_yaml(path)
+            if "yaml" in body:
+                if not isinstance(body["yaml"], str):
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, "yaml must be a string")
+                candidate = config_edit.parse_yaml(body["yaml"])
+            elif isinstance(body.get("config"), dict):
+                candidate = config_edit.prune(body["config"])
+            else:
+                raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'config': {...}} or {'yaml': '...'}")
+            candidate = config_edit.unmask(candidate, current)
+            config_edit.validate(candidate)             # raises with the loader's message
+            backup = config_edit.save(path, candidate)
+        except config_edit.ConfigEditError as e:
+            raise _HttpError(HTTPStatus.BAD_REQUEST, f"config rejected: {e}")
+        except OSError as e:
+            raise _HttpError(HTTPStatus.INTERNAL_SERVER_ERROR, f"could not write {path}: {e}")
+        log.info("config saved to %s (backup %s)", path, backup)
+        restart = bool(body.get("restart", False))
+        if restart:
+            self._schedule_restart()
+        self._json(HTTPStatus.OK, {
+            "saved": True, "path": str(path), "backup": str(backup),
+            "restarting": restart,
+            "yaml": config_edit.to_yaml(config_edit.mask(candidate)),
+        })
+
+    def _schedule_restart(self) -> None:
+        """Stop the slideshow shortly after this response goes out so the
+        client sees the acknowledgement; the supervisor relaunches us."""
+        request_restart = getattr(self._ctrl, "request_restart", None)
+        if request_restart is None:
+            raise _HttpError(HTTPStatus.NOT_IMPLEMENTED, "restart not supported")
+        threading.Timer(0.5, request_restart).start()
 
     def _static(self, url_path: str) -> None:
         filename, content_type = _STATIC[url_path]

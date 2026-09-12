@@ -55,6 +55,12 @@ class _StubController:
     favorite_result: dict | Exception = {"id": "x", "favorite": True}
     favorite_calls: list = []
 
+    config = None                     # set by tests that exercise /api/config
+    restart_calls = 0
+
+    def request_restart(self):
+        self.restart_calls += 1
+
     def hide_current(self):
         if isinstance(self.hide_result, Exception):
             raise self.hide_result
@@ -830,3 +836,136 @@ def test_state_includes_hidden_count():
     with _server() as (base, ctrl, _):
         ctrl.hidden_count = 3
         assert requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()["hidden_count"] == 3
+
+
+
+# ── Settings: /api/config ─────────────────────────────────────────────────
+
+
+class _Cfg:
+    def __init__(self, path):
+        self.path = path
+
+
+def _write_cfg(tmp_path, text):
+    p = tmp_path / "config.yaml"
+    p.write_text(text)
+    return p
+
+
+BASE_CFG = """immich:
+  url: https://immich.example
+  api_key: SECRET-KEY
+selection:
+  default_mode: playlist
+  playlist:
+    - {mode: random, count: 25}
+control:
+  http:
+    password: HTTP-PW
+"""
+
+
+def test_get_config_masks_secrets_and_ships_schema(tmp_path):
+    with _server() as (base, ctrl, _):
+        ctrl.config = _Cfg(_write_cfg(tmp_path, BASE_CFG))
+        r = requests.get(f"{base}/api/config", timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        body = r.json()
+        assert body["exists"] is True and body["path"].endswith("config.yaml")
+        assert body["config"]["immich"]["api_key"] == body["mask"]
+        assert body["config"]["control"]["http"]["password"] == body["mask"]
+        assert "SECRET-KEY" not in r.text and "HTTP-PW" not in r.text
+        assert body["config"]["selection"]["playlist"] == [{"mode": "random", "count": 25}]
+        assert any(s["section"] == "selection" for s in body["schema"])
+        assert "people" in body["playlist_entry_options"]
+        assert "favorites" in body["modes"]
+
+
+def test_get_config_requires_auth(tmp_path):
+    with _server() as (base, _, _):
+        assert requests.get(f"{base}/api/config", timeout=2.0).status_code == 401
+
+
+def test_post_config_tree_keeps_masked_secrets_and_writes_backup(tmp_path):
+    import yaml
+    with _server() as (base, ctrl, _):
+        path = _write_cfg(tmp_path, BASE_CFG)
+        ctrl.config = _Cfg(path)
+        current = requests.get(f"{base}/api/config", timeout=2.0, auth=_auth()).json()
+        tree = current["config"]
+        tree["selection"]["playlist"].append({"mode": "people", "count": 10, "min_photos": 30})
+        tree["viewer"] = {"time_delay": 45, "show_text": ["date", "location"], "min_rating": None}
+        r = requests.post(f"{base}/api/config", json={"config": tree}, timeout=5.0, auth=_auth())
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["saved"] is True and body["restarting"] is False
+        saved = yaml.safe_load(path.read_text())
+        assert saved["immich"]["api_key"] == "SECRET-KEY"                 # mask round-tripped
+        assert saved["control"]["http"]["password"] == "HTTP-PW"
+        assert saved["selection"]["playlist"][1] == {"mode": "people", "count": 10, "min_photos": 30}
+        assert saved["viewer"] == {"time_delay": 45, "show_text": ["date", "location"]}   # None pruned
+        assert path.with_name("config.yaml.bak").exists()
+        assert "SECRET-KEY" not in r.text
+        assert ctrl.restart_calls == 0
+
+
+def test_post_config_rejects_invalid_and_leaves_file_alone(tmp_path):
+    with _server() as (base, ctrl, _):
+        path = _write_cfg(tmp_path, BASE_CFG)
+        ctrl.config = _Cfg(path)
+        before = path.read_text()
+        r = requests.post(f"{base}/api/config",
+                          json={"config": {"immich": {"url": "https://x", "api_key": "k"}, "selection": {"default_mode": "bogus"}}},
+                          timeout=5.0, auth=_auth())
+        assert r.status_code == 400 and "default_mode" in r.json()["error"]
+        assert path.read_text() == before
+        r = requests.post(f"{base}/api/config", json={"yaml": "immich: [oops"}, timeout=5.0, auth=_auth())
+        assert r.status_code == 400 and "YAML" in r.json()["error"]
+        r = requests.post(f"{base}/api/config", json={"nothing": 1}, timeout=5.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_config_yaml_text_and_restart(tmp_path):
+    import time, yaml
+    with _server() as (base, ctrl, _):
+        path = _write_cfg(tmp_path, BASE_CFG)
+        ctrl.config = _Cfg(path)
+        masked = requests.get(f"{base}/api/config", timeout=2.0, auth=_auth()).json()["yaml"]
+        edited = masked.replace("default_mode: playlist", "default_mode: favorites")
+        r = requests.post(f"{base}/api/config", json={"yaml": edited, "restart": True}, timeout=5.0, auth=_auth())
+        assert r.status_code == 200 and r.json()["restarting"] is True
+        saved = yaml.safe_load(path.read_text())
+        assert saved["selection"]["default_mode"] == "favorites"
+        assert saved["immich"]["api_key"] == "SECRET-KEY"                 # mask in YAML text restored too
+        deadline = time.time() + 3
+        while ctrl.restart_calls == 0 and time.time() < deadline:
+            time.sleep(0.05)
+        assert ctrl.restart_calls == 1
+
+
+def test_post_restart_endpoint(tmp_path):
+    import time
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/restart", timeout=2.0, auth=_auth())
+        assert r.status_code == 202
+        deadline = time.time() + 3
+        while ctrl.restart_calls == 0 and time.time() < deadline:
+            time.sleep(0.05)
+        assert ctrl.restart_calls == 1
+
+
+def test_config_page_is_served(tmp_path):
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/config", timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and "Settings" in r.text
+        r = requests.get(f"{base}/static/config.js", timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and "application/javascript" in r.headers["Content-Type"]
+
+
+def test_config_defaults_to_user_path_when_daemon_has_none(monkeypatch, tmp_path):
+    monkeypatch.setattr("immframe.interfaces.http.Config.default_user_path", staticmethod(lambda: tmp_path / "new.yaml"))
+    with _server() as (base, ctrl, _):
+        ctrl.config = None
+        body = requests.get(f"{base}/api/config", timeout=2.0, auth=_auth()).json()
+        assert body["exists"] is False and body["path"].endswith("new.yaml")

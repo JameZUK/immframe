@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>immframe · Settings</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1><a href="/" class="back">‹ immframe</a> Settings</h1>
+    <span id="connection" class="badge" data-status="loading">…</span>
+  </header>
+
+  <main class="app settings">
+    <section class="card">
+      <div class="tabs">
+        <button type="button" class="tab" data-tab="form" data-active="true">Form</button>
+        <button type="button" class="tab" data-tab="yaml">Raw YAML</button>
+      </div>
+      <p class="hint">Edits <code id="cfg-path">…</code>. Changes take effect after a restart of the slideshow —
+        <em>Save &amp; restart</em> does both (the frame is back in about ten seconds). Secrets show as
+        <code>••••••••</code> and stay as they are unless you type a new value.</p>
+    </section>
+
+    <div id="tab-form">
+      <section class="card" id="playlist-card">
+        <h2>Playlist <span class="hint">(used when Mode = playlist — each entry shows <em>count</em> slides, or collages)</span></h2>
+        <div id="playlist-rows"></div>
+        <div class="row"><button type="button" id="playlist-add">+ Add entry</button></div>
+      </section>
+      <div id="form-sections"></div>
+    </div>
+
+    <div id="tab-yaml" hidden>
+      <section class="card">
+        <textarea id="yaml" spellcheck="false" rows="32"></textarea>
+      </section>
+    </div>
+
+    <section class="card savebar">
+      <div class="row">
+        <button type="button" id="btn-save">Save</button>
+        <button type="button" id="btn-save-restart" data-active="true">Save &amp; restart</button>
+      </div>
+      <div id="save-msg" class="curate-msg" hidden></div>
+    </section>
+  </main>
+
+  <script src="/static/config.js"></script>
+</body>
+</html>

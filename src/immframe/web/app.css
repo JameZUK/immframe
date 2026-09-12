@@ -285,3 +285,58 @@ button.danger:hover { background: var(--err); color: white; border-color: var(--
     font-size: 12px;
   }
 }
+
+
+/* ── Settings page ─────────────────────────────────────────────────────── */
+
+.app-header h1 a.back { color: var(--fg-dim); text-decoration: none; font-weight: 500; margin-right: 6px; }
+.app-header .settings-link { color: var(--fg-dim); text-decoration: none; font-size: 13px; margin-left: auto; margin-right: 12px; }
+.app-header .settings-link:hover { color: var(--fg); }
+
+.settings .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.settings .tab { flex: 0 0 auto; padding: 8px 14px; }
+.settings .hint { font-size: 12px; color: var(--fg-dim); margin: 2px 0 0; }
+.settings h2 .hint { display: inline; font-weight: 400; margin-left: 6px; }
+.settings code { font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+.settings .field { margin-bottom: 10px; }
+.settings .field .row { margin-bottom: 2px; }
+.settings .row label { min-width: 150px; }
+.settings .row input[type="number"],
+.settings .row input[type="password"] {
+  flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; font-size: 14px; font-family: inherit;
+}
+.settings .checks { flex: 1; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.settings .checks label { display: inline-flex; align-items: center; gap: 4px; }
+.settings .checks input { accent-color: var(--accent); }
+.settings textarea {
+  width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.settings .savebar { position: sticky; bottom: 0; z-index: 5; }
+.settings .savebar .row button { flex: 1; }
+
+.pl-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: var(--bg); }
+.pl-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pl-num { color: var(--fg-dim); font-size: 12px; min-width: 18px; text-align: right; }
+.pl-top select { flex: 1 1 120px; }
+.pl-top input[type="number"] { width: 70px; flex: 0 0 auto; }
+.pl-top select, .pl-top input[type="number"] {
+  background: var(--bg-card); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 14px; font-family: inherit;
+}
+.pl-collage { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+.pl-collage input { accent-color: var(--accent); }
+.pl-tools { display: flex; gap: 4px; margin-left: auto; }
+.pl-tools button { flex: 0 0 auto; padding: 4px 8px; font-size: 12px; }
+.pl-opts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; padding-left: 26px; font-size: 12px; color: var(--fg-dim); }
+.pl-opts label { display: inline-flex; align-items: center; gap: 4px; }
+.pl-opts input[type="text"], .pl-opts input[type="number"], .pl-opts select {
+  background: var(--bg-card); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 4px 6px; font-size: 12px; font-family: inherit; max-width: 160px;
+}
+.pl-opts input[type="number"] { width: 84px; }
+.pl-opts input[type="checkbox"] { accent-color: var(--accent); }
+.curate-msg[data-kind="info"] { color: var(--fg-dim); }
+.curate-msg[data-kind="warn"] { color: var(--warn); }

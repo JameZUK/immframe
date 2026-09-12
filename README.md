@@ -60,6 +60,10 @@ UX picframe got right.
   **♥ Favourite** and **Never show again** for the photo on screen
   (curate the frame from the sofa — hides instantly, stars/archives in
   Immich when the key can write)
+- **Settings page** (`/config`) edits `config.yaml` from the phone: a
+  playlist builder (add / reorder / per-mode options / collage), every
+  common setting as a form, a raw-YAML tab for the rest, validation
+  through the same loader the daemon uses, and *Save & restart*
 - CLI for ops:
   `immframe doctor` (checks Immich + the kiosk and prints fixes),
   `immframe state`, `immframe pause`, `immframe next`,

@@ -165,7 +165,16 @@ def _run_slideshow(config: Config) -> int:
         return 1
     finally:
         controller.stop()
+    if controller.restart_requested:
+        # Settings saved from the dashboard: exit non-zero so both the labwc
+        # autostart loop and a systemd Restart=on-failure unit bring us back
+        # with the new config.
+        log.info("restarting to apply new configuration")
+        return RESTART_EXIT_CODE
     return 0
+
+
+RESTART_EXIT_CODE = 3
 
 
 # ── CLI client ─────────────────────────────────────────────────────────────

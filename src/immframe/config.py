@@ -232,19 +232,38 @@ class Config:
     viewer: ViewerConfig
     control: ControlConfig
     collage: CollageConfig = field(default_factory=CollageConfig)
+    # Where the user's YAML was read from (None = packaged defaults only).
+    path: Path | None = None
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":
         """Locate user config, deep-merge with packaged defaults, build dataclasses."""
         user_path = cls._locate(path)
-        with _DEFAULT_YAML_PATH.open() as f:
-            merged = yaml.safe_load(f) or {}
+        user: dict[str, Any] = {}
         if user_path is not None:
             with user_path.open() as f:
                 user = yaml.safe_load(f) or {}
-            merged = _deep_merge(merged, user)
+        cfg = cls.from_user_dict(user)
+        cfg.path = user_path
+        return cfg
+
+    @classmethod
+    def from_user_dict(cls, user: dict[str, Any]) -> "Config":
+        """Build from an in-memory user config (the same merge + validation
+        `load()` applies to the YAML file). The dashboard's config editor
+        validates candidate configs through here before writing them."""
+        if not isinstance(user, dict):
+            raise ValueError("config must be a mapping at the top level")
+        with _DEFAULT_YAML_PATH.open() as f:
+            merged = yaml.safe_load(f) or {}
+        merged = _deep_merge(merged, user)
         merged = _expand_tree(merged)
         return cls._build(merged)
+
+    @staticmethod
+    def default_user_path() -> Path:
+        """Where to create the user config when none exists yet."""
+        return _SEARCH_PATHS[0]
 
     @staticmethod
     def _locate(explicit: Path | None) -> Path | None:

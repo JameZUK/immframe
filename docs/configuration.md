@@ -243,6 +243,9 @@ clamped to 2–12 and the worker keeps `min ≤ max` automatically.
 | `POST /api/collage_min_tiles` | `{"value": 4}` | Lower tile bound (2–12) |
 | `POST /api/collage_max_tiles` | `{"value": 8}` | Upper tile bound (2–12) |
 | `GET /api/state` | — | Includes a `"collage"` block with the current values |
+| `GET /api/config` | — | The user's `config.yaml` (secrets masked) plus the form schema the Settings page renders |
+| `POST /api/config` | `{"config": {...}}` or `{"yaml": "..."}`, optional `"restart": true` | Validate through the daemon's own loader, write atomically (previous file kept as `config.yaml.bak`), optionally restart to apply |
+| `POST /api/restart` | — | Stop the slideshow so the supervisor (labwc autostart loop / systemd) relaunches it with the config on disk |
 
 **CLI** (thin client over the HTTP API):
 
