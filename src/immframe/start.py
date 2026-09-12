@@ -106,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "explore",
-        help="Dump Immich's /search/explore facets (scene-mode debug)",
+        help="Dump Immich's /search/explore facets and /search/cities (scene-mode debug)",
     )
 
     return parser
@@ -311,24 +311,34 @@ def _cmd_immich_explore(config: Config) -> int:
             result = c.explore()
         except ImmichError as e:
             raise _CliError(str(e)) from e
+        try:
+            cities = c.list_cities()
+        except ImmichError as e:
+            cities = []
+            print(f"/search/cities failed: {e}\n")
     finally:
         c.close()
-    if not result:
+    if not result and not cities:
         print(
             "(empty)\n"
             "\n"
-            "Immich's /search/explore returned no facets. This usually means\n"
-            "smart-search / CLIP classification jobs haven't completed.\n"
+            "Immich's /search/explore returned no facets and /search/cities\n"
+            "no cities. This usually means smart-search / CLIP classification\n"
+            "jobs haven't completed.\n"
             "Check Immich -> Administration -> Jobs -> Smart Search."
         )
         return 1
-    print(f"Available facets: {sorted(result.keys())}\n")
+    print(f"Available explore facets: {sorted(result.keys())}\n")
     for field_name in sorted(result.keys()):
         values = result[field_name]
-        print(f"{field_name} ({len(values)} values):")
+        print(f"{field_name} ({len(values)} values, explore caps each facet at 12):")
         for v in values:
             print(f"  {v}")
         print()
+    print(f"/search/cities ({len(cities)} cities — what scene mode uses when "
+          f"there's no 'things' facet):")
+    for city in cities:
+        print(f"  {city}")
     return 0
 
 

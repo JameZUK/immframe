@@ -298,6 +298,27 @@ class ImmichClient:
                 out[name] = values
         return out
 
+    def list_cities(self) -> list[str]:
+        """GET /search/cities — every distinct city in the library, sorted.
+
+        Immich answers with one representative asset per city; we only keep
+        `exifInfo.city`. Unlike the city facet of `/search/explore`, which is
+        capped at 12 entries (alphabetically first — so a big library only
+        ever surfaces its "A" cities), this is the full list.
+        """
+        data = self._get("/search/cities")
+        if not isinstance(data, list):
+            raise ImmichError("/search/cities: expected list")
+        cities: set[str] = set()
+        for d in data:
+            if not isinstance(d, dict):
+                continue
+            exif = d.get("exifInfo") or {}
+            city = exif.get("city") if isinstance(exif, dict) else None
+            if isinstance(city, str) and city.strip():
+                cities.add(city.strip())
+        return sorted(cities)
+
     # ── Bytes ───────────────────────────────────────────────────────────
     def download_preview(self, asset_id: str, dest: Path) -> None:
         """Stream the configured-size JPEG to `dest`. Atomic (tmp + rename).

@@ -357,6 +357,44 @@ def test_random_assets_non_list_raises():
 
 
 @responses.activate
+def test_list_cities_dedupes_and_sorts():
+    def city_asset(aid, city):
+        d = _asset_json(aid)
+        d["exifInfo"]["city"] = city
+        return d
+    responses.add(
+        responses.GET,
+        f"{BASE}/api/search/cities",
+        json=[
+            city_asset("a", "York"),
+            city_asset("b", "Amsterdam"),
+            city_asset("c", "York"),            # duplicate
+            city_asset("d", ""),                # empty
+            city_asset("e", None),              # null
+            {"id": "f"},                        # no exifInfo at all
+            "junk",                             # malformed entry
+        ],
+    )
+    c = ImmichClient(BASE, "k")
+    assert c.list_cities() == ["Amsterdam", "York"]
+
+
+@responses.activate
+def test_list_cities_empty():
+    responses.add(responses.GET, f"{BASE}/api/search/cities", json=[])
+    c = ImmichClient(BASE, "k")
+    assert c.list_cities() == []
+
+
+@responses.activate
+def test_list_cities_non_list_raises():
+    responses.add(responses.GET, f"{BASE}/api/search/cities", json={"nope": 1})
+    c = ImmichClient(BASE, "k")
+    with pytest.raises(ImmichError):
+        c.list_cities()
+
+
+@responses.activate
 def test_explore_returns_facet_values():
     responses.add(
         responses.GET,

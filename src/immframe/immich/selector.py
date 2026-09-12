@@ -493,11 +493,17 @@ class SceneSelector:
     in this priority order:
 
         1. CLIP scene labels ('things' facet from /search/explore)
-        2. Cities ('exifInfo.city' / 'city' facet from /search/explore)
-        3. Named, non-hidden people (/people endpoint)
-        4. Curated CLIP queries (hard-coded fallback that works whenever
-           Immich's smart search is functional, even if /search/explore
-           doesn't surface anything useful)
+        2. Cities — the full list from /search/cities, falling back to the
+           'exifInfo.city' / 'city' facet of /search/explore (which Immich
+           caps at 12 alphabetically-first entries, so on its own a large
+           library only ever rotates through its "A" cities)
+        3. Curated CLIP queries (hard-coded fallback that works whenever
+           Immich's smart search is functional, even if Immich surfaces
+           nothing useful)
+
+    A label whose pool comes back with fewer than `MIN_POOL` assets is
+    skipped for another (up to `MAX_LABEL_TRIES` draws) — a one-photo city
+    makes neither a scene nor a collage.
 
     Each rotation picks a random label from the chosen source and fetches a
     pool of matching assets — via CLIP smart search (things / curated) or a
@@ -508,6 +514,8 @@ class SceneSelector:
     """
 
     SourceMode = Literal["things", "city", "curated"]
+    MIN_POOL = 3
+    MAX_LABEL_TRIES = 4
 
     def __init__(
         self,
@@ -529,6 +537,7 @@ class SceneSelector:
         # following _collect_labels to avoid a duplicate round-trip. Cleared
         # after use so later label refills re-fetch fresh facets.
         self._explore_cache: dict[str, list[str]] | None = None
+        self._cities_cache: list[str] | None = None      # same idea, for /search/cities
         # Per-rotation state:
         self._labels: list[str] = []
         self._current_scene: str | None = None
@@ -571,9 +580,17 @@ class SceneSelector:
                 )
                 return
 
-        self._current_scene = random.choice(self._labels)
-        log.info("scene[%s] rotation -> %r", self._mode, self._current_scene)
-        pool = self._query_assets(self._current_scene)
+        label = random.choice(self._labels)
+        pool = self._query_assets(label)
+        tries = 1
+        while len(pool) < self.MIN_POOL and tries < self.MAX_LABEL_TRIES and len(self._labels) > 1:
+            log.debug("scene[%s] %r has %d asset(s) — trying another label",
+                      self._mode, label, len(pool))
+            label = random.choice(self._labels)
+            pool = self._query_assets(label)
+            tries += 1
+        self._current_scene = label
+        log.info("scene[%s] rotation -> %r (%d assets)", self._mode, label, len(pool))
         random.shuffle(pool)
         self._pool = pool
 
@@ -584,28 +601,40 @@ class SceneSelector:
         try:
             explore = self._client.explore()
         except ImmichError as e:
-            log.warning("explore failed: %s — falling back to curated queries", e)
-            return "curated"
-
-        self._explore_cache = explore  # reused by the following _collect_labels
+            log.warning("explore failed: %s", e)
+            explore = {}
 
         if explore.get("things"):
+            self._explore_cache = explore  # reused by the following _collect_labels
             return "things"
+
+        cities = self._fetch_cities()
+        if cities:
+            self._cities_cache = cities
+            return "city"
 
         for k, v in explore.items():
             if k.endswith("city") and v:
                 self._city_facet = k
+                self._explore_cache = explore
                 return "city"
 
         facets = sorted(explore.keys())
         log.warning(
-            "no usable Immich classification available (explore facets: %s); "
-            "falling back to curated CLIP queries. If smart search is enabled "
-            "in your Immich, this still produces good variety. Run "
+            "no usable Immich classification available (explore facets: %s, "
+            "no cities); falling back to curated CLIP queries. If smart search "
+            "is enabled in your Immich, this still produces good variety. Run "
             "`immframe explore` for diagnostics.",
             facets or "none",
         )
         return "curated"
+
+    def _fetch_cities(self) -> list[str]:
+        try:
+            return self._client.list_cities()
+        except ImmichError as e:
+            log.warning("list_cities failed: %s — trying explore's city facet", e)
+            return []
 
     def _collect_labels(self) -> list[str]:
         cached = self._explore_cache
@@ -617,6 +646,13 @@ class SceneSelector:
             except ImmichError:
                 return []
         if self._mode == "city":
+            cities = self._cities_cache
+            self._cities_cache = None
+            if cities is None:
+                cities = self._fetch_cities()
+            if cities:
+                return list(cities)
+            # Older Immich without /search/cities: explore's (capped) facet.
             try:
                 explore = cached if cached is not None else self._client.explore()
             except ImmichError:

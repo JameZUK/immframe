@@ -242,7 +242,7 @@ classification: Immich groups photos into themes like "beach",
 "mountain", "forest", "wedding", etc. via the [Smart Search](https://immich.app/docs/features/smart-search)
 ML model. Pick this mode and immframe will:
 
-1. Query `/search/explore` for the available scene labels.
+1. Query `/search/explore` for CLIP scene labels (or, when Immich has none, `/search/cities` for the full list of cities).
 2. Pick one at random.
 3. Slideshow ~25 photos from that scene.
 4. Rotate to a new random scene.

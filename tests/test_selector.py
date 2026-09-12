@@ -128,25 +128,32 @@ def test_smart_set_query_replaces():
 def test_scene_prefers_things_facet_when_present():
     client = MagicMock()
     client.explore.return_value = {"things": ["beach", "mountain"], "exifInfo.city": ["Paris"]}
-    client.search_smart.return_value = [_a("s1"), _a("s2")]
+    client.search_smart.return_value = [_a("s1"), _a("s2"), _a("s3")]
 
     sel = SceneSelector(client, pool_size=5)
-    batch = sel.next_batch(2)
+    batch = sel.next_batch(3)
 
     assert sel.mode == "things"
+    client.list_cities.assert_not_called()
     client.search_smart.assert_called_once()
     chosen = client.search_smart.call_args.args[0]
     assert chosen in ("beach", "mountain")
     assert sel.current_scene == chosen
-    assert {a.id for a in batch} == {"s1", "s2"}
+    assert {a.id for a in batch} == {"s1", "s2", "s3"}
 
 
-def test_scene_uses_city_when_things_missing():
-    """The bug from the field: Immich only surfaces city facets. Scene mode
-    should use them via a city-filtered random sample instead of giving up."""
+def _pool(prefix: str, n: int = 3) -> list:
+    return [_a(f"{prefix}{i}") for i in range(n)]
+
+
+def test_scene_uses_full_city_list_when_things_missing():
+    """The bug from the field: /search/explore's city facet is capped at 12
+    alphabetically-first entries, so a big library only ever rotated through
+    its "A" cities. Scene mode must use the full /search/cities list."""
     client = MagicMock()
-    client.explore.return_value = {"exifInfo.city": ["Amsterdam", "Aberfeldy"]}
-    client.random_assets.return_value = [_a("city-a")]
+    client.explore.return_value = {"exifInfo.city": ["Aberfeldy", "Abersoch"]}   # the capped facet
+    client.list_cities.return_value = ["Aberfeldy", "Abersoch", "York", "Zaandijk"]
+    client.random_assets.return_value = _pool("city-")
 
     sel = SceneSelector(client)
     batch = sel.next_batch(5)
@@ -155,25 +162,104 @@ def test_scene_uses_city_when_things_missing():
     # Used a city-filtered random sample, NOT smart search
     client.search_smart.assert_not_called()
     city = client.random_assets.call_args.kwargs["city"]
-    assert city in ("Amsterdam", "Aberfeldy")
-    assert batch[0].id == "city-a"
+    assert city in ("Aberfeldy", "Abersoch", "York", "Zaandijk")
+    assert sel.current_scene == city
+    assert batch[0].id.startswith("city-")
+
+
+def test_scene_city_labels_span_full_list():
+    client = MagicMock()
+    client.explore.return_value = {}
+    client.list_cities.return_value = [f"c{i}" for i in range(50)]
+    client.random_assets.return_value = _pool("x")
+
+    sel = SceneSelector(client, pool_size=3)
+    seen = set()
+    for _ in range(60):
+        sel.next_batch(3)                        # each call drains the pool → rotates
+        seen.add(sel.current_scene)
+    assert len(seen) > 12                        # well beyond explore's cap
+
+
+def test_scene_falls_back_to_explore_city_facet_without_cities_endpoint():
+    """Older Immich: /search/cities fails → use whatever explore gives."""
+    client = MagicMock()
+    client.explore.return_value = {"exifInfo.city": ["Amsterdam", "Aberfeldy"]}
+    client.list_cities.side_effect = ImmichError("404")
+    client.random_assets.return_value = _pool("f")
+
+    sel = SceneSelector(client)
+    sel.next_batch(5)
+
+    assert sel.mode == "city"
+    assert client.random_assets.call_args.kwargs["city"] in ("Amsterdam", "Aberfeldy")
+
+
+def test_scene_explore_error_still_tries_cities():
+    client = MagicMock()
+    client.explore.side_effect = ImmichError("upstream down")
+    client.list_cities.return_value = ["York"]
+    client.random_assets.return_value = _pool("y")
+
+    sel = SceneSelector(client)
+    batch = sel.next_batch(5)
+    assert sel.mode == "city"
+    assert batch[0].id.startswith("y")
 
 
 def test_scene_city_resamples_each_rotation():
     """/search/metadata returns the same newest-first page for a city every
     time; a random sample must be drawn per rotation instead."""
     client = MagicMock()
-    client.explore.return_value = {"exifInfo.city": ["Amsterdam"]}
-    client.random_assets.side_effect = [[_a("a1"), _a("a2")], [_a("b1"), _a("b2")]]
+    client.explore.return_value = {}
+    client.list_cities.return_value = ["Amsterdam"]
+    client.random_assets.side_effect = [_pool("a"), _pool("b")]
 
-    sel = SceneSelector(client, pool_size=2)
-    first = sel.next_batch(2)
-    second = sel.next_batch(2)
+    sel = SceneSelector(client, pool_size=3)
+    first = sel.next_batch(3)
+    second = sel.next_batch(3)
 
-    assert {a.id for a in first} == {"a1", "a2"}
-    assert {a.id for a in second} == {"b1", "b2"}
+    assert {a.id for a in first} == {"a0", "a1", "a2"}
+    assert {a.id for a in second} == {"b0", "b1", "b2"}
     assert client.random_assets.call_count == 2
     client.search_metadata.assert_not_called()
+
+
+def test_scene_skips_thin_city_pools():
+    """A one-photo city is neither a scene nor a collage: draw another label
+    (bounded) before settling."""
+    client = MagicMock()
+    client.explore.return_value = {}
+    client.list_cities.return_value = ["Tiny", "Big"]
+    client.random_assets.side_effect = lambda n, **kw: (
+        _pool("big", 5) if kw["city"] == "Big" else [_a("only-one")]
+    )
+    # Bias random.choice toward "Tiny" first, then "Big"
+    import random as _random
+    choices = iter(["Tiny", "Big"])
+    orig = _random.choice
+    _random.choice = lambda seq: next(choices)
+    try:
+        sel = SceneSelector(client, pool_size=5)
+        batch = sel.next_batch(5)
+    finally:
+        _random.choice = orig
+
+    assert sel.current_scene == "Big"
+    assert len(batch) == 5
+
+
+def test_scene_thin_pool_retry_is_bounded():
+    client = MagicMock()
+    client.explore.return_value = {}
+    client.list_cities.return_value = ["A", "B", "C", "D", "E", "F"]
+    client.random_assets.return_value = [_a("solo")]        # every city is thin
+
+    sel = SceneSelector(client, pool_size=5)
+    batch = sel.next_batch(5)
+
+    assert client.random_assets.call_count == SceneSelector.MAX_LABEL_TRIES
+    assert [a.id for a in batch] == ["solo"]                # still serves what it got
 
 
 def test_scene_falls_back_to_curated_when_only_people_present():
@@ -181,13 +267,14 @@ def test_scene_falls_back_to_curated_when_only_people_present():
     the people facet and falls back to curated CLIP queries."""
     client = MagicMock()
     client.explore.return_value = {"people": ["Alice", "Bob"]}
-    client.search_smart.return_value = [_a("curated-hit")]
+    client.list_cities.return_value = []
+    client.search_smart.return_value = _pool("curated-hit")
 
     sel = SceneSelector(client)
     batch = sel.next_batch(5)
 
     assert sel.mode == "curated"
-    assert batch[0].id == "curated-hit"
+    assert batch[0].id.startswith("curated-hit")
 
 
 def test_scene_falls_back_to_curated_when_nothing_useful():
@@ -196,8 +283,8 @@ def test_scene_falls_back_to_curated_when_nothing_useful():
     isn't dead in the water."""
     client = MagicMock()
     client.explore.return_value = {}
-    client.list_people.return_value = []
-    client.search_smart.return_value = [_a("curated-hit")]
+    client.list_cities.return_value = []
+    client.search_smart.return_value = _pool("curated-hit")
 
     sel = SceneSelector(client)
     batch = sel.next_batch(5)
@@ -207,35 +294,32 @@ def test_scene_falls_back_to_curated_when_nothing_useful():
     client.random_assets.assert_not_called()
     chosen = client.search_smart.call_args.args[0]
     assert chosen in CURATED_SCENE_QUERIES
-    assert batch[0].id == "curated-hit"
+    assert batch[0].id.startswith("curated-hit")
 
 
-def test_scene_explore_error_falls_back_to_curated():
-    from immframe.immich.client import ImmichError
+def test_scene_explore_and_cities_errors_fall_back_to_curated():
     client = MagicMock()
     client.explore.side_effect = ImmichError("upstream down")
-    client.search_smart.return_value = [_a("ok")]
+    client.list_cities.side_effect = ImmichError("upstream down")
+    client.search_smart.return_value = _pool("ok")
 
     sel = SceneSelector(client)
     batch = sel.next_batch(1)
     assert sel.mode == "curated"
-    assert batch[0].id == "ok"
+    assert batch[0].id.startswith("ok")
 
 
 def test_scene_exhausts_pool_then_rotates():
     client = MagicMock()
     client.explore.return_value = {"things": ["beach"]}
-    client.search_smart.side_effect = [
-        [_a("a1"), _a("a2")],
-        [_a("b1"), _a("b2")],
-    ]
+    client.search_smart.side_effect = [_pool("a"), _pool("b")]
 
-    sel = SceneSelector(client, pool_size=2)
-    first = sel.next_batch(2)
-    second = sel.next_batch(2)
+    sel = SceneSelector(client, pool_size=3)
+    first = sel.next_batch(3)
+    second = sel.next_batch(3)
 
-    assert {a.id for a in first} == {"a1", "a2"}
-    assert {a.id for a in second} == {"b1", "b2"}
+    assert {a.id for a in first} == {"a0", "a1", "a2"}
+    assert {a.id for a in second} == {"b0", "b1", "b2"}
     assert client.search_smart.call_count == 2
 
 
@@ -248,8 +332,9 @@ def test_scene_query_failure_does_not_block_subsequent():
     sel = SceneSelector(client, pool_size=5)
     assert sel.next_batch(5) == []
     # Recover on next call
-    client.search_smart.side_effect = [[_a("ok")]]
-    assert sel.next_batch(5)[0].id == "ok"
+    client.search_smart.side_effect = None
+    client.search_smart.return_value = _pool("ok")
+    assert sel.next_batch(5)[0].id.startswith("ok")
 
 
 # ── PeopleSelector ──────────────────────────────────────────────────────
@@ -597,11 +682,11 @@ def test_playlist_mixes_singles_and_collages():
 def test_scene_force_mode_skips_discovery():
     """Useful for tests and explicit user preference."""
     client = MagicMock()
-    client.search_smart.return_value = [_a("forced")]
+    client.search_smart.return_value = _pool("forced")
 
     sel = SceneSelector(client, force_mode="curated")
     batch = sel.next_batch(1)
     assert sel.mode == "curated"
     client.explore.assert_not_called()
-    client.list_people.assert_not_called()
-    assert batch[0].id == "forced"
+    client.list_cities.assert_not_called()
+    assert batch[0].id.startswith("forced")
