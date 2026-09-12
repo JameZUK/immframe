@@ -187,6 +187,22 @@ class VideoPlayer:
             self._mpv["fullscreen"] = True
         except Exception as e:
             log.warning("mpv fullscreen request failed: %s", e)
+            return
+        # Confirm it took (off mpv's event thread; the compositor needs a
+        # moment to reconfigure the surface).
+        threading.Timer(1.0, self._log_window_after_fullscreen).start()
+
+    def _log_window_after_fullscreen(self) -> None:
+        try:
+            fs = bool(self._mpv.fullscreen)
+            dims = self._mpv.osd_dimensions or {}
+            w, h = dims.get("w"), dims.get("h")
+        except Exception:
+            return                                      # clip already over
+        if fs:
+            log.info("mpv window now %sx%s fullscreen=True", w, h)
+        else:
+            log.warning("mpv window still %sx%s and NOT fullscreen — compositor ignored the request", w, h)
 
     # ── Diagnostics ─────────────────────────────────────────────────────
     @staticmethod
@@ -195,7 +211,11 @@ class VideoPlayer:
         levels at WARNING and the rest at DEBUG so noisy MPV chatter
         doesn't drown out our own logs by default."""
         msg = f"mpv[{prefix}]: {message.rstrip()}"
-        if level in ("fatal", "error"):
+        # hwdec=auto-copy probes every decoder in turn; ffmpeg reports each
+        # miss (no CUDA/VAAPI on a Pi) as an error. Expected — keep it debug.
+        if prefix == "ffmpeg" and "AVHWDeviceContext" in message:
+            log.debug(msg)
+        elif level in ("fatal", "error"):
             log.warning(msg)
         elif level == "warn":
             log.info(msg)
