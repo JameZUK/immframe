@@ -460,3 +460,34 @@ def test_stop_is_idempotent():
     w.start()
     w.stop(timeout=1.0)
     w.stop(timeout=1.0)
+
+
+def test_cache_dir_explicit_is_created_and_used(tmp_path):
+    target = tmp_path / "cache" / "nested"
+    w = PrefetchWorker(MagicMock(), MagicMock(), cache_dir=target)
+    try:
+        assert w._tmp_dir.parent == target and target.is_dir()
+    finally:
+        w.stop(timeout=1.0)
+
+
+def test_cache_dir_default_prefers_dev_shm(monkeypatch, tmp_path):
+    from immframe.immich import prefetch as pf
+    shm = tmp_path / "shm"; shm.mkdir()
+    monkeypatch.setattr(pf, "_DEFAULT_RAM_DIR", shm)
+    w = PrefetchWorker(MagicMock(), MagicMock())
+    try:
+        assert w._tmp_dir.parent == shm
+    finally:
+        w.stop(timeout=1.0)
+
+
+def test_cache_dir_falls_back_to_system_temp(monkeypatch, tmp_path):
+    from immframe.immich import prefetch as pf
+    monkeypatch.setattr(pf, "_DEFAULT_RAM_DIR", tmp_path / "missing")
+    w = PrefetchWorker(MagicMock(), MagicMock())
+    try:
+        import tempfile
+        assert w._tmp_dir.parent == Path(tempfile.gettempdir())
+    finally:
+        w.stop(timeout=1.0)

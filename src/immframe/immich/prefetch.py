@@ -23,6 +23,7 @@ selector or filters so stale assets don't surface.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import random
 import shutil
@@ -43,6 +44,29 @@ log = logging.getLogger(__name__)
 
 QueueItem = tuple[Path | None, Asset, list[str] | None]
 
+# RAM-backed location for the prefetch cache. On Raspberry Pi OS /tmp is on
+# the SD card, and a frame rewrites 1-2 MB per slide around the clock —
+# ~1.5 GB/day of flash wear for files that live a few minutes. /dev/shm is
+# tmpfs on every systemd Linux; a 5-deep queue of full-size JPEGs plus
+# collage sources is tens of MB.
+_DEFAULT_RAM_DIR = Path("/dev/shm")
+
+
+def _cache_parent(cache_dir: str | Path | None) -> str | None:
+    """Directory to create the prefetch temp dir under: an explicit
+    `cache_dir` (created if missing), else /dev/shm when usable, else the
+    system default (`None` → tempfile's choice)."""
+    if cache_dir:
+        d = Path(cache_dir).expanduser()
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            return str(d)
+        except OSError as e:
+            log.warning("cache_dir %s unusable (%s) — falling back", d, e)
+    if _DEFAULT_RAM_DIR.is_dir() and os.access(_DEFAULT_RAM_DIR, os.W_OK):
+        return str(_DEFAULT_RAM_DIR)
+    return None
+
 
 class PrefetchWorker:
     def __init__(
@@ -55,6 +79,7 @@ class PrefetchWorker:
         wants_ocr: Callable[[], bool] | None = None,
         collage: "CollageConfig | None" = None,
         collage_label: Callable[[int], str] | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         self._client = client
         # Predicate, re-read per fetch so a runtime show_text toggle is honored.
@@ -72,7 +97,8 @@ class PrefetchWorker:
         self._queue: queue.Queue[QueueItem] = queue.Queue(maxsize=queue_size)
         self._stop_evt = threading.Event()
         self._empty_backoff_s = empty_backoff_s
-        self._tmp_dir = Path(tempfile.mkdtemp(prefix="immframe-"))
+        self._tmp_dir = Path(tempfile.mkdtemp(prefix="immframe-", dir=_cache_parent(cache_dir)))
+        log.info("prefetch cache: %s", self._tmp_dir)
         self._thread: threading.Thread | None = None
 
     def set_collage_canvas(self, w: int, h: int) -> None:

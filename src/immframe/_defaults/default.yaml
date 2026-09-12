@@ -23,6 +23,7 @@ selection:
   recent_field: created                    # 'created' (uploaded) or 'taken' (capture date)
   playlist: []                             # used when default_mode = playlist; see docs/configuration.md
   prefetch_count: 5                        # queue depth ahead of slideshow
+  cache_dir: ""                            # prefetch cache; "" = /dev/shm (RAM, no SD-card wear) if present
 
 video:
   enabled: true

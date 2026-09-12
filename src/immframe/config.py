@@ -107,6 +107,10 @@ class SelectionConfig:
     # See docs/configuration.md for the schema.
     playlist: list[dict[str, Any]] = field(default_factory=list)
     prefetch_count: int = 5
+    # Where prefetched slides are cached. "" = /dev/shm (RAM) when available,
+    # else the system temp dir. Set explicitly to keep it off the SD card on
+    # systems without /dev/shm, or onto disk if RAM is tight.
+    cache_dir: str = ""
 
 
 @dataclass
@@ -300,6 +304,7 @@ class Config:
             # Floor at 1: queue.Queue(maxsize=0) is UNBOUNDED, which would
             # remove the backpressure that caps prefetch disk usage.
             prefetch_count=max(1, int(sel_raw.get("prefetch_count", 5))),
+            cache_dir=str(sel_raw.get("cache_dir", "") or ""),
         )
         if selection.default_mode not in SELECTION_MODES:
             raise ValueError(

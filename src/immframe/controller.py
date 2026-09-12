@@ -251,6 +251,7 @@ class Controller:
             # render path unchanged; label reflects the active selection.
             collage=replace(self._collage),
             collage_label=self._collage_label,
+            cache_dir=config.selection.cache_dir or None,
         )
 
         # Lazily constructed in start() so module import doesn't pull pi3d/mpv

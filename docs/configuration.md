@@ -59,6 +59,7 @@ immich:
 | `recent_field` | enum | `created` | `created` = "uploaded to Immich" (most users want this for "new photos"); `taken` = "captured by camera" (use for "trip from last month"). |
 | `playlist` | list[dict] | `[]` | Used when `default_mode = playlist`. See [Playlist mode](#playlist-mode) below. |
 | `prefetch_count` | int | `5` | How many slides to pre-download ahead of the renderer. Higher = smoother on slow networks, more temp-disk and RAM. |
+| `cache_dir` | string | `""` | Where prefetched slides are cached. Empty = `/dev/shm` (RAM-backed tmpfs) when present, else the system temp dir. On Raspberry Pi OS `/tmp` is on the SD card and a frame rewrites 1–2 MB per slide around the clock, so keeping the cache in RAM avoids ~1.5 GB/day of flash wear. |
 
 ### The selection modes
 
