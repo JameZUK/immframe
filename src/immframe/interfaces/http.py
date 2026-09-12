@@ -456,25 +456,28 @@ class _Handler(BaseHTTPRequestHandler):
     def _version(self) -> None:
         self._json(HTTPStatus.OK, {"version": __version__})
 
+    @staticmethod
+    def _asset_obj(asset) -> dict | None:
+        if asset is None:
+            return None
+        camera = " ".join(p for p in (asset.camera_make, asset.camera_model) if p)
+        return {
+            "id": asset.id,
+            "file": asset.original_file_name,
+            "kind": asset.kind.value,
+            "taken_at": asset.taken_at.isoformat() if asset.taken_at is not None else None,
+            "city": asset.geo.city,
+            "country": asset.geo.country,
+            "camera": camera or None,
+            "favorite": asset.favorite,
+            # Collages are synthetic — the UI must load them from
+            # /api/current_image, not the Immich image proxy.
+            "is_collage": is_collage_id(asset.id),
+        }
+
     def _state(self) -> None:
         c = self._ctrl
-        asset = c.current_asset
-        asset_obj = None
-        if asset is not None:
-            camera = " ".join(p for p in (asset.camera_make, asset.camera_model) if p)
-            asset_obj = {
-                "id": asset.id,
-                "file": asset.original_file_name,
-                "kind": asset.kind.value,
-                "taken_at": asset.taken_at.isoformat() if asset.taken_at is not None else None,
-                "city": asset.geo.city,
-                "country": asset.geo.country,
-                "camera": camera or None,
-                "favorite": asset.favorite,
-                # Collages are synthetic — the UI must load them from
-                # /api/current_image, not the Immich image proxy.
-                "is_collage": is_collage_id(asset.id),
-            }
+        asset_obj = self._asset_obj(c.current_asset)
         self._json(HTTPStatus.OK, {
             "paused": c.paused,
             "selection_mode": c.selection_mode,
@@ -495,6 +498,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "max_tiles": c.collage_max_tiles,
             },
             "current_asset": asset_obj,
+            # Second portrait sharing the slide (viewer.portrait_pairs), or null.
+            "pair_asset": self._asset_obj(getattr(c, "pair_asset", None)),
             "hidden_count": getattr(c, "hidden_count", 0),
         })
 

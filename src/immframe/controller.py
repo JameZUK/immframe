@@ -66,6 +66,10 @@ _VIEWER_DEFAULTS: dict = {
     "text_x_margin": 100,
     "text_y_margin": 0,
     "fit": True,
+    # Show two consecutive portrait photos side by side (one 16:9 slide)
+    # instead of each alone with ⅔ of the screen empty. Videos, live photos
+    # and collages are never paired.
+    "portrait_pairs": True,
     "video_fit_display": False,
     "kenburns": False,
     "display_x": 0,
@@ -202,6 +206,14 @@ class Controller:
         self._force_next_evt = threading.Event()
         self._paused = False
         self._current_asset: Asset | None = None
+        # Second asset when two portraits share the slide (see loop()).
+        self._pair_asset: Asset | None = None
+        self._portrait_pairs = bool(config.viewer.raw.get(
+            "portrait_pairs", _VIEWER_DEFAULTS["portrait_pairs"]))
+        # Lookahead item held back by the pairing logic; dropped when the
+        # selection changes so a stale slide from the old mode never shows.
+        self._pending_item = None
+        self._drop_pending = False
         # Local file backing the current slide (the prefetched preview, or a
         # composited collage). Served by the HTTP /api/current_image endpoint —
         # collages aren't real Immich assets so the image proxy can't fetch them.
@@ -346,7 +358,7 @@ class Controller:
             raise RuntimeError("Controller.start() must be called before loop()")
 
         next_tm = 0.0
-        current_path: Path | None = None
+        current_paths: list[Path] = []                  # files behind the slide on screen
 
         while not self._stop_evt.is_set():
             now = time.time()
@@ -360,7 +372,7 @@ class Controller:
             self._force_next_evt.clear()
 
             if advance:
-                item = self._prefetch.next(timeout=1.0)
+                item = self._take_item(timeout=1.0)
                 if item is None:
                     # Backoff: nothing ready, just keep drawing current
                     if not viewer.slideshow_is_running(
@@ -396,22 +408,27 @@ class Controller:
                     continue
 
                 # --- Standard render path (image / live photo / video poster) ---
+                # Portrait pairing: a second portrait straight after this one
+                # shares the slide (the viewer composites them side by side).
+                pair = self._pair_for(item) if self._portrait_pairs else None
                 self._current_asset = asset
+                self._pair_asset = pair[1] if pair else None
                 self._publish_state()
 
                 # OCR (when shown) was already fetched by the prefetch worker,
                 # off the render thread — see PrefetchWorker._fetch_ocr.
                 pic = Pic(str(new_path), asset, ocr_text=ocr_text)
-                pics_arg = [pic, None]                  # picframe slideshow_is_running shape
+                pic2 = Pic(str(pair[0]), pair[1], ocr_text=pair[2]) if pair else None
+                pics_arg = [pic, pic2]                  # picframe slideshow_is_running shape
                 loop_running, _, _ = viewer.slideshow_is_running(
                     pics_arg, time_delay=time_delay, fade_time=fade_time, paused=self._paused
                 )
 
-                # Clean up the previous slide's file once the new one has been
+                # Clean up the previous slide's files once the new one has been
                 # accepted by the viewer (the old texture is no longer needed).
-                if current_path is not None:
-                    current_path.unlink(missing_ok=True)
-                current_path = new_path
+                for old in current_paths:
+                    old.unlink(missing_ok=True)
+                current_paths = [new_path] + ([pair[0]] if pair else [])
                 self._current_path = new_path           # for /api/current_image
 
                 # Motion clip after the still:
@@ -432,9 +449,53 @@ class Controller:
                 if not loop_running:
                     break
 
-        if current_path is not None:
-            current_path.unlink(missing_ok=True)
+        for old in current_paths:
+            old.unlink(missing_ok=True)
         self._current_path = None
+        pending = self._pending_item
+        self._pending_item = None
+        if pending is not None and pending[0] is not None:
+            pending[0].unlink(missing_ok=True)
+
+    # ── Queue access + portrait pairing ─────────────────────────────────
+    def _take_item(self, *, timeout: float):
+        """Next slide: the held-back lookahead item if there is one (unless
+        the selection changed since it was fetched), else the queue."""
+        pending = self._pending_item
+        self._pending_item = None
+        if pending is not None:
+            if not self._drop_pending:
+                return pending
+            if pending[0] is not None:
+                pending[0].unlink(missing_ok=True)
+        self._drop_pending = False
+        return self._prefetch.next(timeout=timeout)
+
+    @staticmethod
+    def _pairable(item) -> bool:
+        """A plain portrait image: not a video, live photo or collage."""
+        path, asset, _ = item
+        return (
+            path is not None
+            and asset.kind == AssetKind.IMAGE
+            and asset.is_portrait
+            and not asset.live_photo_video_id
+            and not is_collage_id(asset.id)
+        )
+
+    def _pair_for(self, item):
+        """If `item` is a pairable portrait, peek the next queued item; a
+        second pairable portrait is returned to share the slide, anything
+        else is held back as the following slide."""
+        if not self._pairable(item):
+            return None
+        second = self._prefetch.next(timeout=0.5)
+        if second is None:
+            return None
+        if self._pairable(second):
+            return second
+        self._pending_item = second
+        return None
 
     def _play_video(self, asset: Asset) -> None:
         if self._video_player is None:
@@ -442,6 +503,7 @@ class Controller:
             return
         url, headers = self._client.video_play_args(asset.id)
         self._current_asset = asset
+        self._pair_asset = None
         self._publish_state()
         log.info("video play: asset=%s url=%s", asset.id, url)
         self._play_video_url(url, headers)
@@ -650,6 +712,7 @@ class Controller:
         self._selection_mode = mode
         self._selector = self._build_selector(mode)
         self._prefetch.set_selector(self._selector)
+        self._drop_pending = True
         self._force_next_evt.set()
         self._publish_state()
 
@@ -663,6 +726,7 @@ class Controller:
         if isinstance(self._selector, AlbumSelector):
             self._selector.set_album_ids(self._album_ids)
             self._prefetch.drain()
+            self._drop_pending = True
             self._force_next_evt.set()
         self._publish_state()
 
@@ -676,6 +740,7 @@ class Controller:
         if isinstance(self._selector, SmartSelector):
             self._selector.set_query(q)
             self._prefetch.drain()
+            self._drop_pending = True
             self._force_next_evt.set()
         self._publish_state()
 
@@ -689,6 +754,7 @@ class Controller:
         if isinstance(self._selector, PeopleSelector):
             self._selector.set_person_ids(self._people_ids)
             self._prefetch.drain()
+            self._drop_pending = True
             self._force_next_evt.set()
         self._publish_state()
 
@@ -780,6 +846,11 @@ class Controller:
     @property
     def current_asset(self) -> Asset | None:
         return self._current_asset
+
+    @property
+    def pair_asset(self) -> Asset | None:
+        """The second portrait sharing the slide, or None."""
+        return self._pair_asset
 
     def current_local_image(self) -> Path | None:
         """Path to the file backing the current slide (collage composite or

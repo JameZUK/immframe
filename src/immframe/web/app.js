@@ -151,12 +151,14 @@ function render(state) {
       $("meta-where").textContent = [a.city, a.country].filter(Boolean).join(", ") || "—";
       $("meta-camera").textContent = a.camera || "—";
       $("meta-kind").textContent = a.kind || "—";
+      const pa = state.pair_asset;
+      $("meta-pair").textContent = pa ? `with ${pa.file || pa.id}` : "—";
     } else {
       $("btn-favorite").disabled = true;
       $("btn-hide").disabled = true;
       $("current-image").style.display = "none";
       $("image-placeholder").style.display = "flex";
-      ["meta-file", "meta-date", "meta-where", "meta-camera", "meta-kind"].forEach(id => {
+      ["meta-file", "meta-date", "meta-where", "meta-camera", "meta-kind", "meta-pair"].forEach(id => {
         $(id).textContent = "—";
       });
       lastAssetId = null;

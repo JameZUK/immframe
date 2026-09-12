@@ -163,6 +163,7 @@ selection:
 | `mute` | bool | `true` | MPV `mute` option. |
 | `vo` | enum | `gpu` | MPV video output backend. `gpu` (the default — KMS/DRM on Pi, X11 GL elsewhere), `x11`, `drm`, or `sdl`. |
 | `fit` | enum | `contain` | How video fits the screen. `contain` preserves aspect ratio and letterboxes/pillarboxes the gaps (no cropping). `cover` preserves aspect ratio but fills the whole screen, cropping the overflow — good for edge-to-edge playback on a 16:9 panel at the cost of clipping the edges. |
+| `portrait_pairs` | bool | `true` | Show two consecutive portrait photos side by side on one slide (the viewer composites and mats them as a pair, with both captions) instead of each alone with two-thirds of a 16:9 screen empty. Videos, live photos and collages are never paired; the second photo appears as `pair_asset` in `/api/state`. |
 | `poster` | bool | `true` | When `true`, render the video's matted preview JPEG via pi3d first (same fade/blur/mat treatment as images), then hand off to MPV. When `false`, videos go straight to MPV fullscreen with no frame. |
 | `poster_hold_s` | float | `3.0` | Seconds to hold the matted poster before MPV starts. |
 | `live_photo_hold_s` | float | `1.0` | Seconds to hold the still before playing a Live Photo's motion clip. |

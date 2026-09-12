@@ -174,6 +174,7 @@ def _attrs_of(controller: "Controller", entity: Entity) -> dict | None:
             "kind": a.kind.value,
             "favorite": a.favorite,
             "scene": scene,
+            "paired_with": getattr(getattr(controller, "pair_asset", None), "id", None),
         }
     return None
 

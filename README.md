@@ -45,7 +45,8 @@ UX picframe got right.
   - **Memory** / **Recent** / **Playlist** — on-this-day, latest uploads,
     and a round-robin of any of the above (with per-entry collages)
 - Crossfades, blur edges, Ken Burns, optional mat compositing (from
-  picframe's renderer, unchanged)
+  picframe's renderer, unchanged); consecutive portraits are shown as a
+  side-by-side pair instead of each alone on a 16:9 screen
 - Date / location overlay text — fields come straight from Immich, no
   EXIF parsing
 - Direct video streaming via [python-mpv](https://github.com/jaseg/python-mpv)

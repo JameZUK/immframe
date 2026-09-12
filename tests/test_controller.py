@@ -479,3 +479,74 @@ def test_prefetch_gets_hidden_predicate(tmp_path):
         assert pred("nope") is False
         c._hidden.add("nope")
         assert pred("nope") is True
+
+
+# ── Portrait pairing ─────────────────────────────────────────────────────
+
+
+def _item(aid, *, w=1000, h=1500, kind=None, live=None, path=True):
+    from pathlib import Path
+    from immframe.immich.models import Asset, AssetKind, GeoInfo
+    a = Asset(
+        id=aid, kind=kind or AssetKind.IMAGE, original_file_name=f"{aid}.jpg", mime_type="image/jpeg",
+        width=w, height=h, taken_at=None, geo=GeoInfo(None, None, None, None, None),
+        camera_make=None, camera_model=None, title=None, caption=None, tag_names=(),
+        people=(), favorite=False, live_photo_video_id=live,
+    )
+    return (Path(f"/nonexistent/{aid}.jpg") if path else None, a, None)
+
+
+def test_pairable_rules():
+    from immframe.controller import Controller
+    from immframe.immich.models import AssetKind
+    assert Controller._pairable(_item("p"))
+    assert not Controller._pairable(_item("land", w=1500, h=1000))
+    assert not Controller._pairable(_item("vid", kind=AssetKind.VIDEO))
+    assert not Controller._pairable(_item("live", live="clip"))
+    assert not Controller._pairable(_item("collage-3"))
+    assert not Controller._pairable(_item("nopath", path=False))
+
+
+def test_pair_for_pairs_two_portraits():
+    c = _controller()
+    second = _item("p2")
+    c._prefetch.next.return_value = second
+    assert c._pair_for(_item("p1")) is second
+    assert c._pending_item is None
+
+
+def test_pair_for_holds_back_non_portrait_as_next_slide():
+    c = _controller()
+    land = _item("land", w=1500, h=1000)
+    c._prefetch.next.return_value = land
+    assert c._pair_for(_item("p1")) is None
+    assert c._pending_item is land
+    # The held-back item is what comes off next — without touching the queue.
+    c._prefetch.next.reset_mock()
+    assert c._take_item(timeout=1.0) is land
+    c._prefetch.next.assert_not_called()
+
+
+def test_pair_for_skips_when_first_is_not_portrait_or_queue_empty():
+    c = _controller()
+    c._prefetch.next.return_value = _item("p2")
+    assert c._pair_for(_item("land", w=1500, h=1000)) is None
+    c._prefetch.next.assert_not_called()
+    c._prefetch.next.return_value = None
+    assert c._pair_for(_item("p1")) is None
+
+
+def test_pending_item_dropped_after_selection_change(tmp_path):
+    c = _controller()
+    held = _item("old")
+    held[0].parent  # path object only; nothing on disk to unlink
+    c._pending_item = held
+    c.selection_mode = "random"                   # marks pending stale
+    fresh = _item("fresh")
+    c._prefetch.next.return_value = fresh
+    assert c._take_item(timeout=1.0) is fresh
+
+
+def test_portrait_pairs_config_toggle():
+    assert _controller()._portrait_pairs is True
+    assert _controller(portrait_pairs=False)._portrait_pairs is False
