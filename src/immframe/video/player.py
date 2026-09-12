@@ -169,15 +169,19 @@ class VideoPlayer:
             dims = self._mpv.osd_dimensions or {}
             w, h = dims.get("w"), dims.get("h")
             hw = self._mpv.hwdec_current
+            vp = self._mpv.video_params or {}
+            # Source geometry + the rotation mpv applied from the container's
+            # display matrix — lets a sideways clip be traced to its metadata.
+            src = f"{vp.get('w')}x{vp.get('h')} rotate={vp.get('rotate')}"
         except Exception as e:
             log.debug("mpv window introspection failed: %s", e)
             return
         if fs or not self._ensure_fullscreen:
-            log.info("mpv window %sx%s fullscreen=%s hwdec=%s", w, h, fs, hw)
+            log.info("mpv window %sx%s fullscreen=%s hwdec=%s src=%s", w, h, fs, hw, src)
             return
         log.warning(
             "mpv window is %sx%s and NOT fullscreen after map — requesting "
-            "fullscreen (hwdec=%s)", w, h, hw,
+            "fullscreen (hwdec=%s src=%s)", w, h, hw, src,
         )
         try:
             self._mpv["fullscreen"] = True
