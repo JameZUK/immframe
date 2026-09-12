@@ -385,3 +385,97 @@ def test_selection_mode_setter_accepts_favorites():
     c = _controller()
     c.selection_mode = "favorites"
     assert c.selection_mode == "favorites"
+
+
+
+# ── Curation: hide / favourite ───────────────────────────────────────────
+
+
+def _asset(aid="abc12345-aaaa-bbbb-cccc-1234567890ab", *, favorite=False, live=None):
+    from immframe.immich.models import Asset, AssetKind, GeoInfo
+    return Asset(
+        id=aid, kind=AssetKind.IMAGE, original_file_name="x.jpg", mime_type="image/jpeg",
+        width=1, height=1, taken_at=None, geo=GeoInfo(None, None, None, None, None),
+        camera_make=None, camera_model=None, title=None, caption=None, tag_names=(),
+        people=(), favorite=favorite, live_photo_video_id=live,
+    )
+
+
+def _controller_with_hidden(tmp_path):
+    from immframe.config import SelectionConfig
+    cfg = _config()
+    cfg.selection = SelectionConfig(hidden_file=str(tmp_path / "hidden.json"))
+    with patch("immframe.controller.ImmichClient") as ic, \
+         patch("immframe.controller.PrefetchWorker") as pf:
+        ic.return_value = MagicMock()
+        pf.return_value = MagicMock()
+        from immframe.controller import Controller
+        return Controller(cfg)
+
+
+def test_hide_current_adds_to_list_archives_and_advances(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _asset(live="11111111-2222-3333-4444-555555555555")
+    out = c.hide_current()
+    assert out == {"hidden": c._current_asset.id, "archived": True, "error": None}
+    assert c._current_asset.id in c._hidden
+    assert "11111111-2222-3333-4444-555555555555" in c._hidden       # the motion clip too
+    c._client.update_asset.assert_called_once_with(c._current_asset.id, visibility="archive")
+    assert c._force_next_evt.is_set()
+    assert c.hidden_count == 2
+
+
+def test_hide_current_survives_immich_refusal(tmp_path):
+    from immframe.immich.client import ImmichError
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _asset()
+    c._client.update_asset.side_effect = ImmichError("403 asset.update")
+    out = c.hide_current()
+    assert out["archived"] is False and "403" in out["error"]
+    assert c._current_asset.id in c._hidden                          # hidden locally regardless
+    assert c._force_next_evt.is_set()
+
+
+def test_hide_current_rejects_no_asset_and_collage(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    with pytest.raises(ValueError):
+        c.hide_current()
+    c._current_asset = _asset("collage-7")
+    with pytest.raises(ValueError):
+        c.hide_current()
+    c._client.update_asset.assert_not_called()
+
+
+def test_favorite_current_toggles_and_updates_state(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _asset(favorite=False)
+    out = c.favorite_current()
+    assert out["favorite"] is True
+    c._client.update_asset.assert_called_with(out["id"], favorite=True)
+    assert c.current_asset.favorite is True                          # frozen asset replaced
+    assert c.favorite_current()["favorite"] is False                 # toggles back
+    assert c.favorite_current(True)["favorite"] is True              # explicit set
+
+
+def test_favorite_current_propagates_immich_error(tmp_path):
+    from immframe.immich.client import ImmichError
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _asset()
+    c._client.update_asset.side_effect = ImmichError("403")
+    with pytest.raises(ImmichError):
+        c.favorite_current()
+    assert c.current_asset.favorite is False
+
+
+def test_prefetch_gets_hidden_predicate(tmp_path):
+    with patch("immframe.controller.ImmichClient") as ic, \
+         patch("immframe.controller.PrefetchWorker") as pf:
+        ic.return_value = MagicMock(); pf.return_value = MagicMock()
+        from immframe.config import SelectionConfig
+        from immframe.controller import Controller
+        cfg = _config(); cfg.selection = SelectionConfig(hidden_file=str(tmp_path / "h.json"))
+        c = Controller(cfg)
+        pred = pf.call_args.kwargs["is_hidden"]
+        assert pred("nope") is False
+        c._hidden.add("nope")
+        assert pred("nope") is True

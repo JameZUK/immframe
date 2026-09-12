@@ -17,6 +17,8 @@ HA, and a complete Lovelace card example.
 | `text.immframe_album_ids` | text | Comma-separated album UUIDs |
 | `text.immframe_smart_query` | text | CLIP search query |
 | `button.immframe_next` | button | Force-advance to the next slide |
+| `button.immframe_favorite` | button | Star / unstar the photo on screen in Immich (needs a key with `asset.update` — see `immich.write_api_key`) |
+| `button.immframe_hide` | button | Never show the photo on screen again: added to the frame's local hidden list instantly and archived in Immich when the key allows; the slideshow moves on |
 | `switch.immframe_display_is_on` | switch | Turn the HDMI output on/off |
 | `number.immframe_brightness` | number (0.0–1.0) | Render brightness |
 | `number.immframe_time_delay` | number (1–3600 s) | Slide duration |
@@ -122,6 +124,16 @@ cards:
         entity: button.immframe_next
         name: Next
         icon: mdi:skip-next
+        tap_action: { action: press }
+      - type: button
+        entity: button.immframe_favorite
+        name: Favourite
+        icon: mdi:heart
+        tap_action: { action: press }
+      - type: button
+        entity: button.immframe_hide
+        name: Never again
+        icon: mdi:eye-off
         tap_action: { action: press }
 
   - type: entities

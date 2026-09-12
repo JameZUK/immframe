@@ -55,7 +55,10 @@ UX picframe got right.
   [docs/home-assistant.md](./docs/home-assistant.md) for entities and a
   ready-made Lovelace card
 - Built-in web dashboard at `http://<pi-ip>:8080/` — phone-friendly remote
-  for pause / next / mode / brightness / overlay fields / clock
+  for pause / next / mode / brightness / overlay fields / clock, plus
+  **♥ Favourite** and **Never show again** for the photo on screen
+  (curate the frame from the sofa — hides instantly, stars/archives in
+  Immich when the key can write)
 - CLI for ops:
   `immframe state`, `immframe pause`, `immframe next`,
   `immframe brightness 0.5`, `immframe mode smart`,

@@ -169,6 +169,15 @@ button[data-active="true"] {
   border-color: var(--accent);
 }
 
+button:disabled { opacity: 0.45; cursor: default; transform: none; }
+button.danger:hover { background: var(--err); color: white; border-color: var(--err); }
+.curate-msg {
+  font-size: 13px;
+  color: var(--fg-muted, var(--fg));
+  padding: 0 4px 4px;
+}
+.curate-msg[data-kind="err"] { color: var(--err); }
+
 .row {
   display: flex;
   align-items: center;

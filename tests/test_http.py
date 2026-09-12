@@ -50,6 +50,23 @@ class _StubController:
     def next(self) -> None:
         self.next_calls += 1
 
+    hidden_count = 0
+    hide_result: dict | Exception = {"hidden": "x", "archived": True, "error": None}
+    favorite_result: dict | Exception = {"id": "x", "favorite": True}
+    favorite_calls: list = []
+
+    def hide_current(self):
+        if isinstance(self.hide_result, Exception):
+            raise self.hide_result
+        self.next_calls += 1
+        return self.hide_result
+
+    def favorite_current(self, value=None):
+        self.favorite_calls.append(value)
+        if isinstance(self.favorite_result, Exception):
+            raise self.favorite_result
+        return self.favorite_result
+
     def current_local_image(self):
         return self.current_image_path
 
@@ -761,3 +778,55 @@ def test_static_only_whitelisted_paths_served():
         ]:
             r = requests.get(f"{base}{bad}", timeout=2.0, auth=_auth())
             assert r.status_code == 404, f"should 404: {bad!r}"
+
+
+
+# ── Curation endpoints ───────────────────────────────────────────────────
+
+
+def test_post_hide_returns_summary():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/hide", timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert r.json() == {"hidden": "x", "archived": True, "error": None}
+
+
+def test_post_hide_conflict_on_collage_or_no_asset():
+    with _server() as (base, ctrl, _):
+        ctrl.hide_result = ValueError("a collage is not an Immich asset")
+        r = requests.post(f"{base}/api/hide", timeout=2.0, auth=_auth())
+        assert r.status_code == 409 and "collage" in r.json()["error"]
+
+
+def test_post_favorite_toggle_and_set():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/favorite", timeout=2.0, auth=_auth())            # no body
+        assert r.status_code == 200 and "current_asset" in r.json()
+        r = requests.post(f"{base}/api/favorite", json={}, timeout=2.0, auth=_auth())   # CLI sends {}
+        assert r.status_code == 200
+        r = requests.post(f"{base}/api/favorite", json={"value": False}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.favorite_calls == [None, None, False]
+        r = requests.post(f"{base}/api/favorite", json={"value": "yes"}, timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_favorite_immich_refusal_is_502_with_hint():
+    from immframe.immich.client import ImmichError
+    with _server() as (base, ctrl, _):
+        ctrl.favorite_result = ImmichError("PUT /assets/x: 403 Missing required permission: asset.update")
+        r = requests.post(f"{base}/api/favorite", timeout=2.0, auth=_auth())
+        assert r.status_code == 502
+        assert "write_api_key" in r.json()["error"]
+
+
+def test_curation_endpoints_require_auth():
+    with _server() as (base, _, _):
+        assert requests.post(f"{base}/api/hide", timeout=2.0).status_code == 401
+        assert requests.post(f"{base}/api/favorite", timeout=2.0).status_code == 401
+
+
+def test_state_includes_hidden_count():
+    with _server() as (base, ctrl, _):
+        ctrl.hidden_count = 3
+        assert requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()["hidden_count"] == 3

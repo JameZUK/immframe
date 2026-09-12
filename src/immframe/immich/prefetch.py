@@ -80,10 +80,15 @@ class PrefetchWorker:
         collage: "CollageConfig | None" = None,
         collage_label: Callable[[int], str] | None = None,
         cache_dir: str | Path | None = None,
+        is_hidden: Callable[[str], bool] | None = None,
     ) -> None:
         self._client = client
         # Predicate, re-read per fetch so a runtime show_text toggle is honored.
         self._wants_ocr = wants_ocr or (lambda: False)
+        # "Never show again": asset IDs to drop from every batch (singles and
+        # collage sources alike). Checked per asset, so a hide takes effect
+        # on the very next batch.
+        self._is_hidden = is_hidden or (lambda _id: False)
         # When set, each queue item is a single composited collage instead of
         # one asset. Canvas defaults until the controller learns the display
         # size (set_collage_canvas) at start().
@@ -217,6 +222,7 @@ class PrefetchWorker:
             except Exception as e:
                 log.exception("selector.next_batch raised: %s", e)
                 batch = []
+            batch = [a for a in batch if not self._is_hidden(a.id)]
 
             if not batch:
                 self._stop_evt.wait(self._empty_backoff_s)
@@ -297,6 +303,8 @@ class PrefetchWorker:
                 self._cleanup_sources(sources)
                 return None
             if asset.kind == AssetKind.OTHER:           # audio/other: not a tile
+                continue
+            if self._is_hidden(asset.id):
                 continue
             # Images and videos both contribute a still (video → poster frame).
             src = self._tmp_dir / f"src-{asset.id}-{self._next_seq()}.jpg"

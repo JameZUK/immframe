@@ -30,6 +30,7 @@ Top-level sections:
 |---|---|---|---|
 | `url` | string | `https://immich.local` | Base URL of your Immich server. No trailing slash. immframe appends `/api`. |
 | `api_key` | string | `""` (required) | Immich API key. Create in *Immich → Account Settings → API Keys → New API Key*. `${ENV}` expansion supported. |
+| `write_api_key` | string | `""` | Optional second key used only for the dashboard's *Favourite* / *Never show again* actions (`PUT /assets/{id}` — needs the `asset.update` permission). Lets the everyday `api_key` stay read-only. Empty = use `api_key` for those too. |
 | `timeout_s` | float | `10` | HTTP timeout (seconds) for every Immich call. |
 | `image_size` | enum | `fullsize` | `preview` (~1440px on the long edge) or `fullsize` (original-resolution JPEG; Immich transcodes HEIC/RAW). `fullsize` is right for 4K displays. |
 
@@ -59,6 +60,7 @@ immich:
 | `recent_field` | enum | `created` | `created` = "uploaded to Immich" (most users want this for "new photos"); `taken` = "captured by camera" (use for "trip from last month"). |
 | `playlist` | list[dict] | `[]` | Used when `default_mode = playlist`. See [Playlist mode](#playlist-mode) below. |
 | `prefetch_count` | int | `5` | How many slides to pre-download ahead of the renderer. Higher = smoother on slow networks, more temp-disk and RAM. |
+| `hidden_file` | string | `""` | Where the *Never show again* list lives. Empty = `$XDG_STATE_HOME/immframe/hidden.json` (`~/.local/state/immframe/hidden.json`). A plain JSON list of asset IDs; delete an entry to un-hide. |
 | `cache_dir` | string | `""` | Where prefetched slides are cached. Empty = `/dev/shm` (RAM-backed tmpfs) when present, else the system temp dir. On Raspberry Pi OS `/tmp` is on the SD card and a frame rewrites 1–2 MB per slide around the clock, so keeping the cache in RAM avoids ~1.5 GB/day of flash wear. |
 
 ### The selection modes

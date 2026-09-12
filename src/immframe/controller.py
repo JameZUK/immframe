@@ -21,8 +21,10 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from .collage import is_collage_id
 from .config import SCENE_SOURCES, SELECTION_MODES, Config, SelectionMode
-from .immich.client import ImmichClient
+from .hidden import HiddenList
+from .immich.client import ImmichClient, ImmichError
 from .immich.models import Asset, AssetKind
 from .immich.prefetch import PrefetchWorker
 from .immich.selector import (
@@ -227,6 +229,12 @@ class Controller:
             config.immich.api_key,
             timeout_s=config.immich.timeout_s,
             image_size=config.immich.image_size,
+            write_api_key=config.immich.write_api_key or None,
+        )
+        # "Never show again" — local list, applied by the prefetch worker.
+        self._hidden = HiddenList(
+            Path(config.selection.hidden_file).expanduser()
+            if config.selection.hidden_file else None
         )
 
         # Mutable collage shadow state — seeded from config, tunable at runtime
@@ -252,6 +260,7 @@ class Controller:
             collage=replace(self._collage),
             collage_label=self._collage_label,
             cache_dir=config.selection.cache_dir or None,
+            is_hidden=self._hidden.__contains__,
         )
 
         # Lazily constructed in start() so module import doesn't pull pi3d/mpv
@@ -566,6 +575,59 @@ class Controller:
     # ── Basic transport ─────────────────────────────────────────────────
     def next(self) -> None:
         self._force_next_evt.set()
+
+    # ── Curation from the sofa ──────────────────────────────────────────
+    def hide_current(self) -> dict:
+        """Never show the current asset again: add it (and its live-photo
+        clip) to the local hidden list — instant, needs no write access —
+        then archive it in Immich when the key allows, and advance.
+
+        Returns a summary for the caller: {"hidden": id, "archived": bool,
+        "error": str | None}. Raises ValueError with no current asset or on
+        a collage (synthetic; nothing to hide — use next)."""
+        asset = self._current_asset
+        if asset is None:
+            raise ValueError("no current asset")
+        if is_collage_id(asset.id):
+            raise ValueError("a collage is not an Immich asset — hide its photos individually")
+        ids = [asset.id]
+        if asset.live_photo_video_id:
+            ids.append(asset.live_photo_video_id)
+        self._hidden.add(*ids)
+        log.info("hidden: %s (%s)", asset.id, asset.original_file_name)
+        archived, error = False, None
+        try:
+            self._client.update_asset(asset.id, visibility="archive")
+            archived = True
+            log.info("archived in Immich: %s", asset.id)
+        except ImmichError as e:
+            error = str(e)
+            log.warning("archive in Immich failed (hidden locally anyway): %s", e)
+        self.next()
+        return {"hidden": asset.id, "archived": archived, "error": error}
+
+    def favorite_current(self, value: bool | None = None) -> dict:
+        """Star / unstar the current asset in Immich. `value=None` toggles.
+        Needs a key with `asset.update` (immich.write_api_key). Raises
+        ValueError with no current asset / on a collage, ImmichError when
+        Immich refuses."""
+        asset = self._current_asset
+        if asset is None:
+            raise ValueError("no current asset")
+        if is_collage_id(asset.id):
+            raise ValueError("a collage is not an Immich asset")
+        new = (not asset.favorite) if value is None else bool(value)
+        self._client.update_asset(asset.id, favorite=new)
+        log.info("%s in Immich: %s", "favourited" if new else "unfavourited", asset.id)
+        # Reflect it in state immediately (Asset is frozen → replace).
+        if self._current_asset is asset:
+            self._current_asset = replace(asset, favorite=new)
+        self._publish_state()
+        return {"id": asset.id, "favorite": new}
+
+    @property
+    def hidden_count(self) -> int:
+        return len(self._hidden)
 
     @property
     def paused(self) -> bool:

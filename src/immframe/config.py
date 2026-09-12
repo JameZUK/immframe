@@ -83,6 +83,9 @@ class ImmichConfig:
     api_key: str
     timeout_s: float = 10.0
     image_size: str = "fullsize"               # 'preview' (~1440px) or 'fullsize' (original)
+    # Optional key with `asset.update` for dashboard favourite / hide
+    # actions; empty = use api_key for those too.
+    write_api_key: str = ""
 
 
 @dataclass
@@ -111,6 +114,8 @@ class SelectionConfig:
     # else the system temp dir. Set explicitly to keep it off the SD card on
     # systems without /dev/shm, or onto disk if RAM is tight.
     cache_dir: str = ""
+    # "Never show again" list; "" = $XDG_STATE_HOME/immframe/hidden.json
+    hidden_file: str = ""
 
 
 @dataclass
@@ -285,6 +290,7 @@ class Config:
             api_key=api_key,
             timeout_s=float(immich_raw.get("timeout_s", 10.0)),
             image_size=image_size,
+            write_api_key=str(immich_raw.get("write_api_key") or "").strip(),
         )
 
         sel_raw = data.get("selection", {})
@@ -305,6 +311,7 @@ class Config:
             # remove the backpressure that caps prefetch disk usage.
             prefetch_count=max(1, int(sel_raw.get("prefetch_count", 5))),
             cache_dir=str(sel_raw.get("cache_dir", "") or ""),
+            hidden_file=str(sel_raw.get("hidden_file", "") or ""),
         )
         if selection.default_mode not in SELECTION_MODES:
             raise ValueError(

@@ -22,6 +22,8 @@ Endpoints:
     POST /api/album_ids              {"value": ["uuid", ...]}
     POST /api/smart_query            {"value": "..."}
     POST /api/next                   force-advance
+    POST /api/hide                   never show the current asset again (+ archive in Immich)
+    POST /api/favorite               {"value": bool} or empty body = toggle current asset's ♥
     POST /api/collage_enabled        {"value": bool}
     POST /api/collage_layout         {"value": "auto"|"grid"|"golden_ratio"}
     POST /api/collage_min_tiles      {"value": int 2..12}
@@ -93,6 +95,8 @@ _POST_PATHS = frozenset({
     "/api/smart_query",
     "/api/people_ids",
     "/api/next",
+    "/api/hide",
+    "/api/favorite",
     "/api/brightness",
     "/api/display_is_on",
     "/api/show_text",
@@ -359,6 +363,34 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/next":
             self._ctrl.next()
             return self._empty(HTTPStatus.ACCEPTED)
+        if path == "/api/hide":
+            try:
+                result = self._ctrl.hide_current()
+            except ValueError as e:
+                raise _HttpError(HTTPStatus.CONFLICT, str(e))
+            return self._json(HTTPStatus.OK, result)
+        if path == "/api/favorite":
+            # {"value": bool} sets; no body / {} toggles.
+            body = self._read_json()
+            value = None
+            if body is not None:
+                if not isinstance(body, dict):
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'value': bool} or no body")
+                if "value" in body:
+                    if not isinstance(body["value"], bool):
+                        raise _HttpError(HTTPStatus.BAD_REQUEST, "value must be boolean")
+                    value = body["value"]
+            try:
+                self._ctrl.favorite_current(value)
+            except ValueError as e:
+                raise _HttpError(HTTPStatus.CONFLICT, str(e))
+            except ImmichError as e:
+                raise _HttpError(
+                    HTTPStatus.BAD_GATEWAY,
+                    f"Immich refused the update ({e}) — the key needs asset.update; "
+                    "set immich.write_api_key",
+                )
+            return self._state()
         if path == "/api/brightness":
             value = self._require_number(0.0, 1.0)
             self._ctrl.brightness = value
@@ -463,6 +495,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "max_tiles": c.collage_max_tiles,
             },
             "current_asset": asset_obj,
+            "hidden_count": getattr(c, "hidden_count", 0),
         })
 
     def _static(self, url_path: str) -> None:

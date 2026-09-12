@@ -56,9 +56,13 @@ class ImmichClient:
         timeout_s: float = 10.0,
         session: requests.Session | None = None,
         image_size: str = SIZE_FULLSIZE,
+        write_api_key: str | None = None,
     ) -> None:
         self._base = base_url.rstrip("/") + self._API_PREFIX
         self._api_key = api_key
+        # Optional second key for the few mutating calls (favourite / archive
+        # from the dashboard). Lets the everyday key stay read-only.
+        self._write_api_key = write_api_key or api_key
         self._timeout = timeout_s
         if image_size not in self.VALID_IMAGE_SIZES:
             raise ValueError(
@@ -494,6 +498,34 @@ class ImmichClient:
                 pass
 
     # ── Video (consumed by python-mpv) ──────────────────────────────────
+    # ── Mutations (write key) ───────────────────────────────────────────
+    def update_asset(
+        self,
+        asset_id: str,
+        *,
+        favorite: bool | None = None,
+        visibility: str | None = None,
+    ) -> dict[str, Any]:
+        """PUT /assets/{id} — set favourite and/or visibility. Needs a key
+        with `asset.update`; uses `write_api_key` when configured.
+        Returns the updated AssetResponseDto."""
+        body: dict[str, Any] = {}
+        if favorite is not None:
+            body["isFavorite"] = bool(favorite)
+        if visibility is not None:
+            if visibility not in ("timeline", "archive", "hidden", "locked"):
+                raise ValueError(f"bad visibility {visibility!r}")
+            body["visibility"] = visibility
+        if not body:
+            raise ValueError("update_asset: nothing to update")
+        data = self._request(
+            "PUT", f"/assets/{asset_id}", json=body,
+            headers={self.AUTH_HEADER: self._write_api_key},
+        )
+        if not isinstance(data, dict):
+            raise ImmichError(f"PUT /assets/{asset_id}: expected object")
+        return data
+
     def video_play_args(self, asset_id: str) -> tuple[str, dict[str, str]]:
         """Returns `(url, headers)` for MPV's `loadfile` + `http-header-fields`."""
         return self._url(f"/assets/{asset_id}/video/playback"), {self.AUTH_HEADER: self._api_key}

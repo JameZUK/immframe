@@ -48,6 +48,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("pause", help="Pause the slideshow")
     sub.add_parser("resume", help="Resume the slideshow")
     sub.add_parser("next", help="Force-advance to the next slide")
+    sub.add_parser("hide", help="Never show the current photo again (and archive it in Immich)")
+    fav_p = sub.add_parser("favorite", help="Toggle the current photo's favourite star in Immich")
+    fav_p.add_argument("state", nargs="?", choices=("on", "off"), help="set instead of toggle")
 
     mode_p = sub.add_parser("mode", help="Set selection mode")
     mode_p.add_argument(
@@ -240,6 +243,15 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return 0
     if cmd == "next":
         _post(session, f"{base}/api/next")
+        return 0
+    if cmd == "hide":
+        r = _post(session, f"{base}/api/hide")
+        _print_response(r)
+        return 0
+    if cmd == "favorite":
+        body = None if args.state is None else {"value": args.state == "on"}
+        r = _post(session, f"{base}/api/favorite", body)
+        _print_response(r)
         return 0
     if cmd == "mode":
         _post(session, f"{base}/api/selection_mode", {"value": args.mode})

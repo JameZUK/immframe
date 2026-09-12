@@ -166,6 +166,15 @@ def test_apply_cmd_next_button():
     assert c.next_calls == 1
 
 
+def test_apply_cmd_favorite_and_hide_buttons():
+    c = MagicMock()
+    for oid, method in (("favorite", "favorite_current"), ("hide", "hide_current")):
+        e = next(e for e in ENTITIES if e.object_id == oid)
+        assert e.component == "button" and not e.has_state
+        _apply_cmd(c, e, "PRESS")
+        getattr(c, method).assert_called_once_with()
+
+
 # ── Collage ──────────────────────────────────────────────────────────────────
 
 

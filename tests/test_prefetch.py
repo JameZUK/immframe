@@ -491,3 +491,20 @@ def test_cache_dir_falls_back_to_system_temp(monkeypatch, tmp_path):
         assert w._tmp_dir.parent == Path(tempfile.gettempdir())
     finally:
         w.stop(timeout=1.0)
+
+
+
+def test_hidden_assets_are_dropped_from_batches():
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("keep"), _a("gone"), _a("keep2")], []]
+    client = _client_writing_bytes()
+    w = PrefetchWorker(selector, client, queue_size=5, empty_backoff_s=0.01,
+                       is_hidden=lambda aid: aid == "gone")
+    w.start()
+    try:
+        ids = [w.next(timeout=2.0)[1].id, w.next(timeout=2.0)[1].id]
+        assert ids == ["keep", "keep2"]
+        assert w.next(timeout=0.2) is None
+        assert "gone" not in [c.args[0] for c in client.download_preview.call_args_list]
+    finally:
+        w.stop(timeout=2.0)

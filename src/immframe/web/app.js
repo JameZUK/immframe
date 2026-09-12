@@ -44,6 +44,30 @@ async function postCommand(endpoint) {
   if (!r.ok) throw new Error(`POST ${endpoint} -> ${r.status}`);
 }
 
+// POST with an optional JSON body (null = none) and return the parsed JSON
+// reply, surfacing the server's `error` text on failure so the user sees
+// *why* (e.g. the key lacks asset.update).
+async function postValueRaw(endpoint, body) {
+  const r = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === null ? undefined : JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((data && data.error) || `${endpoint} -> ${r.status}`);
+  return data;
+}
+
+let curateTimer = null;
+function curateMsg(kind, text) {
+  const el = $("curate-msg");
+  el.textContent = text;
+  el.dataset.kind = kind;
+  el.hidden = false;
+  if (curateTimer) clearTimeout(curateTimer);
+  curateTimer = setTimeout(() => { el.hidden = true; }, 6000);
+}
+
 // ── Connection badge ──────────────────────────────────────────────────────
 
 function setConnection(status, text) {
@@ -117,12 +141,19 @@ function render(state) {
         $("image-placeholder").style.display = "none";
         lastAssetId = a.id;
       }
+      // Curation buttons: collages are synthetic (nothing to star/hide).
+      $("btn-favorite").disabled = !!a.is_collage;
+      $("btn-hide").disabled = !!a.is_collage;
+      $("btn-favorite").dataset.active = String(!!a.favorite);
+      $("btn-favorite").textContent = a.favorite ? "♥ Favourited" : "♡ Favourite";
       $("meta-file").textContent = a.file || "—";
       $("meta-date").textContent = a.taken_at ? a.taken_at.replace("T", " ").slice(0, 19) : "—";
       $("meta-where").textContent = [a.city, a.country].filter(Boolean).join(", ") || "—";
       $("meta-camera").textContent = a.camera || "—";
       $("meta-kind").textContent = a.kind || "—";
     } else {
+      $("btn-favorite").disabled = true;
+      $("btn-hide").disabled = true;
       $("current-image").style.display = "none";
       $("image-placeholder").style.display = "flex";
       ["meta-file", "meta-date", "meta-where", "meta-camera", "meta-kind"].forEach(id => {
@@ -181,6 +212,31 @@ function wire() {
   $("btn-next").addEventListener("click", async () => {
     try { await postCommand("/api/next"); }
     catch (e) { console.error(e); }
+  });
+
+  $("btn-favorite").addEventListener("click", async () => {
+    // Empty body = toggle. Response is the state snapshot with the new ♥.
+    try {
+      const next = await postValueRaw("/api/favorite", null);
+      if (next) render(next);
+      curateMsg("ok", next && next.current_asset && next.current_asset.favorite
+        ? "Starred in Immich" : "Un-starred in Immich");
+    } catch (e) {
+      curateMsg("err", String(e.message || e));
+    }
+  });
+
+  $("btn-hide").addEventListener("click", async () => {
+    try {
+      const r = await postValueRaw("/api/hide", null);
+      curateMsg(r && r.archived ? "ok" : "warn",
+        r && r.archived
+          ? "Hidden and archived in Immich — moving on"
+          : `Hidden on the frame (Immich archive failed: ${r && r.error ? r.error : "?"})`);
+      await refresh();
+    } catch (e) {
+      curateMsg("err", String(e.message || e));
+    }
   });
 
   $("mode").addEventListener("change", () => {
