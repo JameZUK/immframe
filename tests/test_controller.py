@@ -312,3 +312,76 @@ def test_current_scene_delegates_to_scene_selector():
     assert isinstance(c._selector, SceneSelector)
     c._selector._current_scene = "beach"
     assert c.current_scene == "beach"
+
+
+# ── Selector construction for the new modes / entry options ─────────────
+
+
+def _controller_with_selection(**sel_kw):
+    from immframe.config import SelectionConfig
+    cfg = _config()
+    cfg.selection = SelectionConfig(**sel_kw)
+    with patch("immframe.controller.ImmichClient") as ic, \
+         patch("immframe.controller.PrefetchWorker") as pf:
+        ic.return_value = MagicMock()
+        pf.return_value = MagicMock()
+        from immframe.controller import Controller
+        return Controller(cfg)
+
+
+def test_favorites_mode_builds_filtered_random():
+    from immframe.immich.selector import RandomSelector
+    c = _controller_with_selection(default_mode="favorites")
+    sel = c._selector
+    assert isinstance(sel, RandomSelector) and sel._favorites is True
+    assert sel.current_scene == "Favourites"
+
+
+def test_random_mode_carries_global_min_rating():
+    c = _controller_with_selection(default_mode="random", min_rating=4)
+    assert c._selector._min_rating == 4
+
+
+def test_scene_source_forces_selector_mode():
+    c = _controller_with_selection(default_mode="scene", scene_source="curated", smart_pages=6)
+    assert c._selector._force_mode == "curated"
+    assert c._selector._pages == 6
+    c = _controller_with_selection(default_mode="scene", scene_source="auto")
+    assert c._selector._force_mode is None
+
+
+def test_people_mode_carries_threshold_and_favorites():
+    c = _controller_with_selection(default_mode="people", people_min_photos=40, people_favorites_only=True)
+    assert c._selector._min_photos == 40 and c._selector._favorites_only is True
+
+
+def test_playlist_entry_overrides_for_new_options():
+    from immframe.immich.selector import PeopleSelector, RandomSelector, SceneSelector
+    c = _controller_with_selection(default_mode="playlist", playlist=[
+        {"mode": "random", "count": 5, "favorites": True, "min_rating": 3, "tag_ids": ["t1"]},
+        {"mode": "favorites", "count": 5},
+        {"mode": "scene", "count": 5, "source": "curated", "pages": 2},
+        {"mode": "people", "count": 5, "min_photos": 100, "favorites_only": True},
+    ])
+    entries = c._selector._entries
+    r = entries[0][0]
+    assert isinstance(r, RandomSelector) and r._favorites and r._min_rating == 3 and r._tag_ids == ["t1"]
+    assert entries[1][0]._favorites is True
+    sc = entries[2][0]
+    assert isinstance(sc, SceneSelector) and sc._force_mode == "curated" and sc._pages == 2
+    pp = entries[3][0]
+    assert isinstance(pp, PeopleSelector) and pp._min_photos == 100 and pp._favorites_only
+
+
+def test_playlist_entry_bad_scene_source_is_skipped():
+    c = _controller_with_selection(default_mode="playlist", playlist=[
+        {"mode": "scene", "count": 5, "source": "nonsense"},
+        {"mode": "random", "count": 5},
+    ])
+    assert len(c._selector._entries) == 1
+
+
+def test_selection_mode_setter_accepts_favorites():
+    c = _controller()
+    c.selection_mode = "favorites"
+    assert c.selection_mode == "favorites"

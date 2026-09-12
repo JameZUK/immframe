@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,10 @@ class ImmichClient:
             self._owns_session = False
         self._session.headers.setdefault(self.AUTH_HEADER, api_key)
         self._session.headers.setdefault("Accept", "application/json")
+        # Server version, resolved lazily on the first search and cached.
+        # Decides the search-filter dialect (see _search_body).
+        self._version: tuple[int, int, int] | None = None
+        self._version_lock = threading.Lock()
 
     def close(self) -> None:
         if self._owns_session:
@@ -117,6 +122,36 @@ class ImmichClient:
             return False
         return isinstance(data, dict) and data.get("res") == "pong"
 
+    def server_version(self) -> tuple[int, int, int] | None:
+        """GET /server/version as (major, minor, patch), cached for the
+        life of the client. None if the endpoint is unreachable or the
+        response is unparseable — callers treat that as "old server"."""
+        with self._version_lock:
+            if self._version is not None:
+                return self._version
+            try:
+                data = self._get("/server/version")
+            except ImmichError as e:
+                log.debug("server version lookup failed: %s", e)
+                return None
+            if not isinstance(data, dict):
+                return None
+            try:
+                v = (int(data["major"]), int(data["minor"]), int(data["patch"]))
+            except (KeyError, TypeError, ValueError):
+                return None
+            self._version = v
+            log.info("Immich server v%d.%d.%d (search dialect: %s)",
+                     *v, "structured filter" if v >= STRUCTURED_FILTER_SINCE else "flat fields")
+            return v
+
+    @property
+    def structured_filters(self) -> bool:
+        """True when the server takes the v3.2+ `filter` object; the flat
+        filter fields are deprecated there and slated for removal."""
+        v = self.server_version()
+        return v is not None and v >= STRUCTURED_FILTER_SINCE
+
     # ── Asset selection ─────────────────────────────────────────────────
     def random_assets(
         self,
@@ -126,44 +161,82 @@ class ImmichClient:
         taken_after: datetime | None = None,
         created_after: datetime | None = None,
         city: str | None = None,
+        country: str | None = None,
         person_ids: Iterable[str] | None = None,
+        album_ids: Iterable[str] | None = None,
+        tag_ids: Iterable[str] | None = None,
+        favorites: bool = False,
+        min_rating: int | None = None,
     ) -> list[Asset]:
         """POST /search/random — returns array of asset DTOs directly.
 
-        Accepts the same structured filters as `search_metadata` (city,
-        person, upload/capture date). Unlike `/search/metadata`, whose
-        ordering is fixed (newest first) and which only ever hands back page
-        1 here, this returns a fresh random sample on every call — so
-        selectors that draw a pool per rotation get variety instead of the
-        same top-N each time.
+        Accepts the same filters as `search_metadata` (city, person, album,
+        tag, favourite, minimum rating, upload/capture date). Unlike
+        `/search/metadata`, whose ordering is fixed (newest first) and which
+        only ever hands back page 1 here, this returns a fresh random sample
+        on every call — so selectors that draw a pool per rotation get
+        variety instead of the same top-N each time.
 
         Always sets `withExif: true` and `withPeople: true` — without these
         flags Immich strips exifInfo / people from the response, leaving
         camera, city, country, taken_at and overlay-people fields null.
         """
-        body = _search_body(
+        body = self._search_body(
             count,
             taken_after=taken_after, created_after=created_after,
-            city=city, person_ids=person_ids,
+            city=city, country=country, person_ids=person_ids,
+            album_ids=album_ids, tag_ids=tag_ids,
+            favorites=favorites, min_rating=min_rating,
+            images_only=not with_video,
         )
-        if not with_video:
-            body["type"] = "IMAGE"
         data = self._post("/search/random", json=body)
         if not isinstance(data, list):
             raise ImmichError(f"/search/random: expected list, got {type(data).__name__}")
         return [_to_asset(d) for d in data if showable(d)]
 
-    def search_smart(self, query: str, *, count: int = 20) -> list[Asset]:
-        """POST /search/smart — returns SearchResponseDto with assets.items."""
-        body = {
-            "query": query,
-            "size": count,
-            "withExif": True,
-            "withPeople": True,
-            "visibility": "timeline",
-        }
+    def search_smart(
+        self, query: str, *, count: int = 20, page: int | None = None,
+        with_video: bool = True,
+    ) -> list[Asset]:
+        """POST /search/smart — CLIP search, ranked by similarity.
+
+        Results are deterministic for a query; `page` (1-based, `count` per
+        page) lets callers sample beyond the top-N so a repeated label
+        doesn't always yield the same photos.
+        """
+        body = self._search_body(count, images_only=not with_video)
+        body["query"] = query
+        if page is not None and page > 1:
+            body["page"] = int(page)
         data = self._post("/search/smart", json=body)
         return _items_from_search(data)
+
+    def search_statistics(
+        self,
+        *,
+        person_ids: Iterable[str] | None = None,
+        city: str | None = None,
+        album_ids: Iterable[str] | None = None,
+        tag_ids: Iterable[str] | None = None,
+        favorites: bool = False,
+        min_rating: int | None = None,
+        with_video: bool = True,
+    ) -> int:
+        """POST /search/statistics — number of timeline assets matching the
+        filters. Cheap: a count query, no asset payload. Used to size a
+        person's library before choosing them for a rotation."""
+        body = self._search_body(
+            0, person_ids=person_ids, city=city, album_ids=album_ids,
+            tag_ids=tag_ids, favorites=favorites, min_rating=min_rating,
+            images_only=not with_video,
+        )
+        body.pop("size", None)
+        body.pop("withExif", None)
+        body.pop("withPeople", None)
+        data = self._post("/search/statistics", json=body)
+        if not isinstance(data, dict) or not isinstance(data.get("total"), int):
+            raise ImmichError("/search/statistics: expected {total: int}")
+        return int(data["total"])
 
     def search_metadata(
         self,
@@ -188,7 +261,7 @@ class ImmichClient:
         the same assets. Use `random_assets(...)` with filters when a varied
         sample is what's wanted.
         """
-        body = _search_body(
+        body = self._search_body(
             count,
             taken_after=taken_after, taken_before=taken_before,
             created_after=created_after, created_before=created_before,
@@ -196,6 +269,12 @@ class ImmichClient:
         )
         data = self._post("/search/metadata", json=body)
         return _items_from_search(data)
+
+    def _search_body(self, count: int, **filters: Any) -> dict[str, Any]:
+        """Request body for the /search/* family in the dialect this server
+        speaks: the v3.2+ structured `filter` object, or the flat fields on
+        older servers (where `filter` would be silently dropped)."""
+        return search_body(count, structured=self.structured_filters, **filters)
 
     def list_memories(self) -> list[dict[str, Any]]:
         """GET /memories — returns the list of on-this-day memories.
@@ -429,9 +508,18 @@ _KIND_MAP = {
 }
 
 
-def _search_body(
+# Immich 3.2.0 replaced the flat search filter fields (city, personIds,
+# takenAfter, visibility, type, …) with one structured `filter` object of
+# per-field operators (eq / in / gte / any / …) and marked every flat field
+# deprecated. Servers before that ignore `filter`; servers after will one day
+# reject the flat fields — so we emit whichever the server understands.
+STRUCTURED_FILTER_SINCE: tuple[int, int, int] = (3, 2, 0)
+
+
+def search_body(
     count: int,
     *,
+    structured: bool,
     taken_after: datetime | None = None,
     taken_before: datetime | None = None,
     created_after: datetime | None = None,
@@ -440,20 +528,61 @@ def _search_body(
     country: str | None = None,
     tag_ids: Iterable[str] | None = None,
     person_ids: Iterable[str] | None = None,
+    album_ids: Iterable[str] | None = None,
+    favorites: bool = False,
+    min_rating: int | None = None,
+    images_only: bool = False,
 ) -> dict[str, Any]:
-    """Request body shared by /search/metadata and /search/random (both take
-    Immich's BaseSearchDto filters)."""
+    """Body shared by /search/random, /search/metadata, /search/smart and
+    /search/statistics (they all take the same filter set).
+
+    Always restricts to timeline assets: without it Immich also returns
+    *hidden* assets — chiefly the motion-clip companion of every live /
+    motion photo (HEIC + MP4 pairs), which would otherwise be played as
+    standalone 3-second videos on top of playing with their still — plus
+    archived and locked-folder assets.
+    """
     body: dict[str, Any] = {
         "size": count,
         "withExif": True,
         "withPeople": True,
-        # Timeline assets only. Without this Immich also returns *hidden*
-        # assets — chiefly the motion-clip companion of every live / motion
-        # photo (HEIC + MP4 pairs), which would otherwise be played as
-        # standalone 3-second videos on top of playing with their still.
-        # Also excludes archived and locked-folder assets.
-        "visibility": "timeline",
     }
+    if structured:
+        f: dict[str, Any] = {"visibility": {"eq": "timeline"}}
+        taken: dict[str, str] = {}
+        if taken_after is not None:
+            taken["gte"] = taken_after.isoformat()
+        if taken_before is not None:
+            taken["lte"] = taken_before.isoformat()
+        if taken:
+            f["takenAt"] = taken
+        created: dict[str, str] = {}
+        if created_after is not None:
+            created["gte"] = created_after.isoformat()
+        if created_before is not None:
+            created["lte"] = created_before.isoformat()
+        if created:
+            f["createdAt"] = created
+        if city is not None:
+            f["city"] = {"eq": city}
+        if country is not None:
+            f["country"] = {"eq": country}
+        if tag_ids is not None:
+            f["tagIds"] = {"any": list(tag_ids)}
+        if person_ids is not None:
+            f["personIds"] = {"any": list(person_ids)}
+        if album_ids is not None:
+            f["albumIds"] = {"any": list(album_ids)}
+        if favorites:
+            f["isFavorite"] = {"eq": True}
+        if min_rating is not None:
+            f["rating"] = {"gte": int(min_rating)}
+        if images_only:
+            f["type"] = {"eq": "IMAGE"}
+        body["filter"] = f
+        return body
+
+    body["visibility"] = "timeline"
     if taken_after is not None:
         body["takenAfter"] = taken_after.isoformat()
     if taken_before is not None:
@@ -470,6 +599,15 @@ def _search_body(
         body["tagIds"] = list(tag_ids)
     if person_ids is not None:
         body["personIds"] = list(person_ids)
+    if album_ids is not None:
+        body["albumIds"] = list(album_ids)
+    if favorites:
+        body["isFavorite"] = True
+    if min_rating is not None:
+        # The flat field is an exact match; there is no >= on old servers.
+        body["rating"] = int(min_rating)
+    if images_only:
+        body["type"] = "IMAGE"
     return body
 
 

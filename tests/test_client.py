@@ -177,6 +177,127 @@ def test_album_assets_drops_hidden():
     assert [a.id for a in c.album_assets("alb1")] == ["a"]
 
 
+def _server_version(major: int, minor: int, patch: int = 0) -> None:
+    responses.add(responses.GET, f"{BASE}/api/server/version",
+                  json={"major": major, "minor": minor, "patch": patch})
+
+
+def _capture(method, path: str, reply):
+    """Register `path` and return a dict that receives the parsed request body."""
+    import json
+    captured = {}
+
+    def cb(request):
+        captured["body"] = json.loads(request.body) if request.body else None
+        return (200, {}, json.dumps(reply))
+
+    responses.add_callback(method, f"{BASE}/api{path}", callback=cb, content_type="application/json")
+    return captured
+
+
+@responses.activate
+def test_structured_filter_dialect_on_immich_3_2():
+    """3.2.0 deprecated every flat search field for a `filter` object."""
+    _server_version(3, 2, 0)
+    cap = _capture(responses.POST, "/search/random", [])
+    from datetime import datetime, timezone
+    c = ImmichClient(BASE, "k")
+    c.random_assets(
+        7, with_video=False, city="York", person_ids=["p1"], album_ids=["a1"],
+        tag_ids=["t1"], favorites=True, min_rating=4,
+        created_after=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+    body = cap["body"]
+    assert body["size"] == 7 and body["withExif"] is True and body["withPeople"] is True
+    assert body["filter"] == {
+        "visibility": {"eq": "timeline"},
+        "createdAt": {"gte": "2026-01-02T00:00:00+00:00"},
+        "city": {"eq": "York"},
+        "tagIds": {"any": ["t1"]},
+        "personIds": {"any": ["p1"]},
+        "albumIds": {"any": ["a1"]},
+        "isFavorite": {"eq": True},
+        "rating": {"gte": 4},
+        "type": {"eq": "IMAGE"},
+    }
+    # None of the deprecated flat fields ride along.
+    for flat in ("visibility", "city", "personIds", "type", "createdAfter", "isFavorite", "rating"):
+        assert flat not in body
+    assert c.structured_filters is True
+
+
+@responses.activate
+def test_flat_filter_dialect_on_older_immich():
+    _server_version(1, 135, 3)
+    cap = _capture(responses.POST, "/search/random", [])
+    c = ImmichClient(BASE, "k")
+    c.random_assets(3, with_video=False, city="York", person_ids=["p1"], favorites=True)
+    body = cap["body"]
+    assert "filter" not in body
+    assert body["visibility"] == "timeline"
+    assert body["city"] == "York" and body["personIds"] == ["p1"]
+    assert body["type"] == "IMAGE" and body["isFavorite"] is True
+    assert c.structured_filters is False
+
+
+@responses.activate
+def test_version_lookup_failure_falls_back_to_flat_and_is_cached():
+    responses.add(responses.GET, f"{BASE}/api/server/version", status=500)
+    cap = _capture(responses.POST, "/search/random", [])
+    c = ImmichClient(BASE, "k")
+    c.random_assets(1)
+    assert "filter" not in cap["body"] and cap["body"]["visibility"] == "timeline"
+    assert c.server_version() is None
+
+
+@responses.activate
+def test_server_version_is_fetched_once():
+    _server_version(3, 2, 0)
+    _capture(responses.POST, "/search/random", [])
+    c = ImmichClient(BASE, "k")
+    c.random_assets(1); c.random_assets(1); c.random_assets(1)
+    assert sum(1 for call in responses.calls if call.request.url.endswith("/server/version")) == 1
+
+
+@responses.activate
+def test_search_smart_passes_page_and_filter():
+    _server_version(3, 2, 0)
+    cap = _capture(responses.POST, "/search/smart", {"assets": {"items": [], "total": 0, "count": 0}})
+    c = ImmichClient(BASE, "k")
+    c.search_smart("sunset", count=25, page=3, with_video=False)
+    body = cap["body"]
+    assert body["query"] == "sunset" and body["size"] == 25 and body["page"] == 3
+    assert body["filter"]["visibility"] == {"eq": "timeline"}
+    assert body["filter"]["type"] == {"eq": "IMAGE"}
+
+
+@responses.activate
+def test_search_smart_page_1_omits_page():
+    cap = _capture(responses.POST, "/search/smart", {"assets": {"items": [], "total": 0, "count": 0}})
+    c = ImmichClient(BASE, "k")
+    c.search_smart("sunset", count=25, page=1)
+    assert "page" not in cap["body"]
+
+
+@responses.activate
+def test_search_statistics_returns_total():
+    _server_version(3, 2, 0)
+    cap = _capture(responses.POST, "/search/statistics", {"total": 3516})
+    c = ImmichClient(BASE, "k")
+    assert c.search_statistics(person_ids=["p1"]) == 3516
+    body = cap["body"]
+    assert body["filter"]["personIds"] == {"any": ["p1"]}
+    assert "size" not in body and "withExif" not in body
+
+
+@responses.activate
+def test_search_statistics_bad_shape_raises():
+    responses.add(responses.POST, f"{BASE}/api/search/statistics", json={"nope": 1})
+    c = ImmichClient(BASE, "k")
+    with pytest.raises(ImmichError):
+        c.search_statistics(person_ids=["p1"])
+
+
 @responses.activate
 def test_random_assets_omits_videos_when_asked():
     captured = {}

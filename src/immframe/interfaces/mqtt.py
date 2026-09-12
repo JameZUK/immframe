@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
 
-from ..config import MqttConfig
+from ..config import SELECTION_MODES, MqttConfig
 
 if TYPE_CHECKING:
     from ..controller import Controller
@@ -64,7 +64,7 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("switch", "paused", "Paused", icon="mdi:pause"),
     Entity(
         "select", "selection_mode", "Selection mode",
-        options=("random", "album", "smart", "scene", "people", "memory", "recent", "playlist"),
+        options=SELECTION_MODES,
         icon="mdi:image-multiple",
     ),
     Entity("text", "album_ids", "Album IDs", icon="mdi:image-album"),

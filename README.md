@@ -30,13 +30,20 @@ UX picframe got right.
 
 ## Features
 
-- Four selection modes, switchable at runtime:
+- Selection modes, switchable at runtime:
   - **Random** — `POST /api/search/random` across the whole library
+  - **Favourites** — random within what you've starred in Immich (also `min_rating`, tag and album narrowing on any random entry)
   - **Album** — random shuffle within one or more albums
   - **Smart** — CLIP search (e.g. *"family at the beach"*)
-  - **Scene** — Immich's auto-discovered CLIP scene labels; picks a random
-    scene (*beach*, *mountain*, *wedding*, …), shows ~25 photos from it,
-    then rotates to a new scene. Zero config.
+  - **Scene** — picks a random label, shows ~25 photos from it, then
+    rotates. Labels come from your library's cities (`/search/cities`)
+    or the curated CLIP themes (*beach*, *mountain*, *wedding*, …) —
+    `scene_source` chooses. Zero config.
+  - **People** — a person at a time: yours by UUID, or auto-rotating
+    through everyone named in Immich with enough photos
+    (`people_min_photos`), optionally only starred people
+  - **Memory** / **Recent** / **Playlist** — on-this-day, latest uploads,
+    and a round-robin of any of the above (with per-entry collages)
 - Crossfades, blur edges, Ken Burns, optional mat compositing (from
   picframe's renderer, unchanged)
 - Date / location overlay text — fields come straight from Immich, no

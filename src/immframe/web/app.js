@@ -66,7 +66,7 @@ function render(state) {
     $("people-ids").value = (state.people_ids || []).join(", ");
 
     // All modes that carry a rotating label
-    const showLabel = ["scene", "people", "memory", "recent", "playlist"].includes(state.selection_mode);
+    const showLabel = ["favorites", "scene", "people", "memory", "recent", "playlist"].includes(state.selection_mode);
     $("scene-row").hidden = !showLabel;
     if (showLabel) {
       $("current-scene").textContent = state.current_scene || "(loading)";

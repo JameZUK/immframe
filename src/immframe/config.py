@@ -29,7 +29,13 @@ from typing import Any, Literal
 import yaml
 
 
-SelectionMode = Literal["random", "album", "smart", "scene", "people", "memory", "recent", "playlist"]
+SelectionMode = Literal[
+    "random", "favorites", "album", "smart", "scene", "people", "memory", "recent", "playlist",
+]
+SELECTION_MODES: tuple[str, ...] = (
+    "random", "favorites", "album", "smart", "scene", "people", "memory", "recent", "playlist",
+)
+SCENE_SOURCES: tuple[str, ...] = ("auto", "things", "city", "curated")
 
 _DEFAULT_YAML_PATH = Path(__file__).parent / "_defaults" / "default.yaml"
 _SEARCH_PATHS = (
@@ -85,8 +91,18 @@ class SelectionConfig:
     album_ids: list[str] = field(default_factory=list)
     smart_query: str = ""
     people_ids: list[str] = field(default_factory=list)  # empty = rotate all named people
+    # Auto-rotation (empty people_ids) only picks people with at least this
+    # many photos; 0 = anyone named. Explicit people_ids are never filtered.
+    people_min_photos: int = 20
+    people_favorites_only: bool = False                  # only people starred in Immich
     recent_days: int = 30                                # "recent" mode window in days
     recent_field: str = "created"                        # 'created' (uploaded) or 'taken'
+    # scene mode label source: auto (things → cities → curated) | things | city | curated
+    scene_source: str = "auto"
+    # CLIP results are ranked; smart/scene(things|curated) draw a random page
+    # from the top N pages so a query doesn't always show the same photos.
+    smart_pages: int = 4
+    min_rating: int | None = None                        # random mode: only assets rated >= N
     # playlist mode: list of entry dicts, each with at least `mode` and `count`.
     # See docs/configuration.md for the schema.
     playlist: list[dict[str, Any]] = field(default_factory=list)
@@ -273,22 +289,32 @@ class Config:
             album_ids=list(sel_raw.get("album_ids", [])),
             smart_query=sel_raw.get("smart_query", ""),
             people_ids=list(sel_raw.get("people_ids", [])),
+            people_min_photos=max(0, int(sel_raw.get("people_min_photos", 20))),
+            people_favorites_only=bool(sel_raw.get("people_favorites_only", False)),
             recent_days=int(sel_raw.get("recent_days", 30)),
             recent_field=sel_raw.get("recent_field", "created"),
+            scene_source=str(sel_raw.get("scene_source", "auto")),
+            smart_pages=max(1, int(sel_raw.get("smart_pages", 4))),
+            min_rating=(int(sel_raw["min_rating"]) if sel_raw.get("min_rating") is not None else None),
             playlist=list(sel_raw.get("playlist", [])),
             # Floor at 1: queue.Queue(maxsize=0) is UNBOUNDED, which would
             # remove the backpressure that caps prefetch disk usage.
             prefetch_count=max(1, int(sel_raw.get("prefetch_count", 5))),
         )
-        valid_modes = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
-        if selection.default_mode not in valid_modes:
+        if selection.default_mode not in SELECTION_MODES:
             raise ValueError(
-                f"selection.default_mode invalid: {selection.default_mode!r}; valid: {valid_modes}"
+                f"selection.default_mode invalid: {selection.default_mode!r}; valid: {SELECTION_MODES}"
             )
         if selection.recent_field not in ("created", "taken"):
             raise ValueError(
                 f"selection.recent_field must be 'created' or 'taken'; got {selection.recent_field!r}"
             )
+        if selection.scene_source not in SCENE_SOURCES:
+            raise ValueError(
+                f"selection.scene_source must be one of {SCENE_SOURCES}; got {selection.scene_source!r}"
+            )
+        if selection.min_rating is not None and not 1 <= selection.min_rating <= 5:
+            raise ValueError(f"selection.min_rating must be 1..5; got {selection.min_rating}")
 
         vid_raw = data.get("video", {})
         # YAML 1.1 boolification: unquoted `no`/`yes` parse to False/True.

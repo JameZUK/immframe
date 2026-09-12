@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import __version__
 from ..collage import is_collage_id
-from ..config import HttpConfig
+from ..config import SELECTION_MODES, HttpConfig
 from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
 
@@ -65,7 +65,7 @@ log = logging.getLogger(__name__)
 _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
 
-_SELECTION_MODES = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
+_SELECTION_MODES = SELECTION_MODES
 _COLLAGE_LAYOUTS = ("auto", "grid", "golden_ratio")
 # Re-export the canonical list from the controller so additions land in one place.
 _SHOW_TEXT_KEYS = SHOW_TEXT_KEYS

@@ -367,7 +367,7 @@ def test_on_connect_publishes_select_options(mqtt_mod):
     )
     payload = json.loads(select_call.args[1])
     assert payload["options"] == [
-        "random", "album", "smart", "scene", "people",
+        "random", "favorites", "album", "smart", "scene", "people",
         "memory", "recent", "playlist",
     ]
 

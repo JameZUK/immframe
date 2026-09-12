@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 from . import __version__
-from .config import Config
+from .config import SELECTION_MODES, Config
 from .immich.client import ImmichClient, ImmichError
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mode_p = sub.add_parser("mode", help="Set selection mode")
     mode_p.add_argument(
         "mode",
-        choices=("random", "album", "smart", "scene", "people", "memory", "recent", "playlist"),
+        choices=SELECTION_MODES,
     )
 
     br_p = sub.add_parser("brightness", help="Set brightness (0.0 - 1.0)")

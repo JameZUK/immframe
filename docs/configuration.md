@@ -46,10 +46,15 @@ immich:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `default_mode` | enum | `random` | One of `random`, `album`, `smart`, `scene`, `people`, `memory`, `recent`, `playlist`. |
+| `default_mode` | enum | `random` | One of `random`, `favorites`, `album`, `smart`, `scene`, `people`, `memory`, `recent`, `playlist`. |
 | `album_ids` | list[string] | `[]` | Album UUIDs to draw from when `default_mode = album`. Multiple albums are merged + shuffled. |
 | `smart_query` | string | `""` | CLIP query when `default_mode = smart`. e.g. `"family at the beach"`. |
 | `people_ids` | list[string] | `[]` | Person UUIDs to filter on when `default_mode = people`. Empty list = rotate through ALL named people in the library. Use `immframe list-people` to discover UUIDs. |
+| `people_min_photos` | int | `20` | Auto-rotation (empty `people_ids`) only picks people with at least this many photos — someone tagged in three photos makes a poor slideshow. Counted via `/search/statistics` (one cheap call per person, cached). `0` = anyone named. Never applied to explicit `people_ids`. |
+| `people_favorites_only` | bool | `false` | Auto-rotation only considers people starred as favourites in Immich (People → ⭐). Falls back to everyone if nobody is starred. |
+| `scene_source` | enum | `auto` | Where scene mode gets its labels: `auto` (CLIP `things` → cities → curated), `things`, `city`, or `curated` (the built-in list of CLIP queries — *sunset*, *beach*, *snow*, *dog*, …; needs smart search enabled in Immich). Recent Immich no longer returns a `things` facet, so `auto` lands on cities; set `curated` for themed scenes instead of places. |
+| `smart_pages` | int | `4` | CLIP results are ranked, so a query would always return the same top photos. `smart` and CLIP-backed `scene` sources draw a random page from the top N pages (page size = batch size) per fetch. |
+| `min_rating` | int | — | `random` mode only shows assets rated ≥ N stars (1–5). Unset = no rating filter. |
 | `recent_days` | int | `30` | Window size for `default_mode = recent`. Photos uploaded (or taken — see `recent_field`) in the last N days. |
 | `recent_field` | enum | `created` | `created` = "uploaded to Immich" (most users want this for "new photos"); `taken` = "captured by camera" (use for "trip from last month"). |
 | `playlist` | list[dict] | `[]` | Used when `default_mode = playlist`. See [Playlist mode](#playlist-mode) below. |
@@ -58,6 +63,7 @@ immich:
 ### The selection modes
 
 - **random** — `POST /api/search/random` across the whole library. Always something fresh.
+- **favorites** — Random within the assets you've starred in Immich. The cheapest curation there is: heart the good ones and the frame follows.
 - **album** — Random within one or more albums. Curated.
 - **smart** — Immich's CLIP smart-search. Free-text. Requires the smart-search ML jobs to have run on your library.
 - **scene** — Picks a random label that Immich has auto-discovered (*beach*, *Amsterdam*, *wedding*, …) and slideshows ~25 photos from it before rotating. **Multi-source with auto-fallback** in this priority order: `things` (CLIP scenes from `/search/explore`) → cities (the full list from `/search/cities`; `/search/explore`'s city facet is capped at 12 entries and only used on older Immich) → curated CLIP queries. Each rotation is a fresh random sample for the label, and labels with fewer than 3 photos are skipped for another. The curated fallback works whenever Immich's smart search is enabled, even when Immich surfaces nothing else useful.
@@ -95,7 +101,8 @@ Per entry:
 - `count` — how many slides to show before rotating to the next entry (default `25`). For a collage entry (`collage: true`) this is the **number of collages**, not photos.
 - `collage` — optional `true`/`false` (default `false`). When `true`, this entry's photos are tiled into collages instead of shown one-per-slide, using the global [`collage:`](#collage) layout/tile settings. The global `collage.enabled` switch does **not** need to be on — per-entry collage works independently, which lets a single playlist interleave full-screen photos and collages from the same sources.
 - Collage overrides (only on a `collage: true` entry) — `layout`, `tiles` (sets both min and max), `min_tiles`, `max_tiles`, `tile_text`, `smart_caption`. Each overrides the global `collage:` value **for that entry only**, so different entries can caption/lay-out their collages differently (e.g. `tile_text: "people"` on the people entry, `smart_caption: true` on the scene entry). Omitted keys inherit the global `collage:` block.
-- Mode-specific overrides — `album_ids`, `smart_query`, `people_ids`, `days`, `field`. If omitted, falls back to the controller-level config value.
+- Mode-specific overrides — `album_ids`, `smart_query`, `people_ids`, `days`, `field`, `source` (scene), `pages` (smart / scene), `min_photos` and `favorites_only` (people). If omitted, falls back to the controller-level config value.
+- Narrowing on `random` / `favorites` entries — `favorites: true`, `min_rating: N`, `album_ids: [...]`, `tag_ids: [...]`. They compose (favourites within an album, 4★+ photos carrying a tag, …) and all ride on the same random-sample request. Tag UUIDs need an API key with `tag.read` to look up (`GET /api/tags`).
 
 The playlist rotates indefinitely. If a sub-selector returns nothing (e.g. `recent` finds no new uploads), playlist auto-advances to the next entry without stalling.
 

@@ -433,3 +433,57 @@ video:
     assert cfg.video.poster is False
     assert cfg.video.poster_hold_s == 0.5
     assert cfg.video.rotate == "180"
+
+
+# ── Selection options added with the Immich 3.2 filter work ─────────────
+
+
+def test_selection_new_defaults(tmp_path: Path):
+    cfg = Config.load(_write(tmp_path, "c.yaml", """
+immich:
+  url: https://immich.example
+  api_key: k
+"""))
+    s = cfg.selection
+    assert s.people_min_photos == 20
+    assert s.people_favorites_only is False
+    assert s.scene_source == "auto"
+    assert s.smart_pages == 4
+    assert s.min_rating is None
+    assert cfg.video.hwdec == "auto-copy"
+    assert cfg.video.ensure_fullscreen is True
+
+
+def test_selection_new_options_parse(tmp_path: Path):
+    cfg = Config.load(_write(tmp_path, "c.yaml", """
+immich:
+  url: https://immich.example
+  api_key: k
+selection:
+  default_mode: favorites
+  people_min_photos: 50
+  people_favorites_only: true
+  scene_source: curated
+  smart_pages: 8
+  min_rating: 4
+video:
+  hwdec: "no"
+  ensure_fullscreen: false
+"""))
+    s = cfg.selection
+    assert s.default_mode == "favorites"
+    assert s.people_min_photos == 50 and s.people_favorites_only is True
+    assert s.scene_source == "curated" and s.smart_pages == 8 and s.min_rating == 4
+    assert cfg.video.hwdec == "no" and cfg.video.ensure_fullscreen is False
+
+
+@pytest.mark.parametrize("bad", ["scene_source: beach", "min_rating: 9", "min_rating: 0"])
+def test_selection_new_options_validate(tmp_path: Path, bad: str):
+    with pytest.raises(ValueError):
+        Config.load(_write(tmp_path, "c.yaml", f"""
+immich:
+  url: https://immich.example
+  api_key: k
+selection:
+  {bad}
+"""))

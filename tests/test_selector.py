@@ -107,19 +107,49 @@ def test_smart_empty_query_returns_empty():
 def test_smart_passes_query():
     client = MagicMock()
     client.search_smart.return_value = [_a("s")]
-    sel = SmartSelector(client, "beach")
+    sel = SmartSelector(client, "beach", pages=1)
     out = sel.next_batch(3)
-    client.search_smart.assert_called_once_with("beach", count=3)
+    client.search_smart.assert_called_once_with("beach", count=3, page=1)
     assert out[0].id == "s"
 
 
 def test_smart_set_query_replaces():
     client = MagicMock()
-    client.search_smart.return_value = []
-    sel = SmartSelector(client, "old")
+    client.search_smart.return_value = [_a("s")]
+    sel = SmartSelector(client, "old", pages=1)
     sel.set_query("new")
     sel.next_batch(5)
-    client.search_smart.assert_called_once_with("new", count=5)
+    client.search_smart.assert_called_once_with("new", count=5, page=1)
+
+
+def test_smart_samples_pages_and_falls_back_to_page_1():
+    """CLIP ranking is deterministic — sample a random page from the top
+    `pages` so a query doesn't show the same N photos forever; an empty
+    later page (few matches) falls back to page 1."""
+    client = MagicMock()
+    client.search_smart.side_effect = lambda q, count, page: [_a(f"p{page}")] if page == 1 else []
+    sel = SmartSelector(client, "beach", pages=4)
+    for _ in range(40):
+        out = sel.next_batch(2)
+        assert out and out[0].id == "p1"                # fallback delivered
+    pages_seen = {c.kwargs["page"] for c in client.search_smart.call_args_list}
+    assert pages_seen == {1, 2, 3, 4}
+
+
+def test_random_selector_passes_filters():
+    client = MagicMock()
+    client.random_assets.return_value = [_a("f")]
+    sel = RandomSelector(client, favorites=True, min_rating=4, album_ids=["alb"], tag_ids=["t"])
+    sel.next_batch(3)
+    client.random_assets.assert_called_once_with(
+        3, with_video=True, favorites=True, min_rating=4, album_ids=["alb"], tag_ids=["t"],
+    )
+    assert sel.current_scene == "Favourites"
+
+
+def test_random_selector_plain_has_no_label():
+    assert RandomSelector(MagicMock()).current_scene is None
+    assert RandomSelector(MagicMock(), min_rating=3).current_scene == "Rated 3+"
 
 
 # ── SceneSelector ───────────────────────────────────────────────────────
@@ -426,6 +456,80 @@ def test_people_resamples_each_rotation():
     assert {a.id for a in second} == {"b1", "b2"}
     assert client.random_assets.call_args.args[0] == 2          # pool_size
     client.search_metadata.assert_not_called()
+
+
+def test_people_min_photos_skips_thin_people():
+    """Auto-rotation with people_min_photos: draw until someone with enough
+    photos comes up; counts via /search/statistics, cached."""
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "thin", "name": "Thin", "isHidden": False},
+        {"id": "big", "name": "Big", "isHidden": False},
+    ]
+    client.search_statistics.side_effect = lambda person_ids: {"thin": 3, "big": 900}[person_ids[0]]
+    client.random_assets.return_value = [_a("shot")]
+
+    sel = PeopleSelector(client, min_photos=20, pool_size=1)
+    for _ in range(10):
+        sel.next_batch(1)
+        assert sel.current_scene == "Big"
+    # Each person counted at most once.
+    assert client.search_statistics.call_count <= 2
+
+
+def test_people_min_photos_not_applied_to_explicit_ids():
+    client = MagicMock()
+    client.list_people.return_value = [{"id": "p1", "name": "Alice", "isHidden": False}]
+    client.random_assets.return_value = [_a("shot")]
+    sel = PeopleSelector(client, person_ids=["p1"], min_photos=1000)
+    assert sel.next_batch(1)
+    client.search_statistics.assert_not_called()
+
+
+def test_people_min_photos_falls_back_to_largest_when_all_thin():
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "a", "name": "A", "isHidden": False},
+        {"id": "b", "name": "B", "isHidden": False},
+    ]
+    client.search_statistics.side_effect = lambda person_ids: {"a": 3, "b": 7}[person_ids[0]]
+    client.random_assets.return_value = [_a("shot")]
+    sel = PeopleSelector(client, min_photos=50, pool_size=1)
+    sel.next_batch(1)
+    assert sel.current_scene == "B"
+
+
+def test_people_statistics_error_still_rotates():
+    client = MagicMock()
+    client.list_people.return_value = [{"id": "a", "name": "A", "isHidden": False}]
+    client.search_statistics.side_effect = ImmichError("no permission")
+    client.random_assets.return_value = [_a("shot")]
+    sel = PeopleSelector(client, min_photos=50)
+    assert sel.next_batch(1)[0].id == "shot"
+
+
+def test_people_favorites_only_prefers_starred():
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "p1", "name": "Alice", "isHidden": False, "isFavorite": False},
+        {"id": "p2", "name": "Bob", "isHidden": False, "isFavorite": True},
+    ]
+    client.random_assets.return_value = [_a("shot")]
+    sel = PeopleSelector(client, favorites_only=True, pool_size=1)
+    for _ in range(5):
+        sel.next_batch(1)
+        assert sel.current_scene == "Bob"
+
+
+def test_people_favorites_only_falls_back_when_none_starred():
+    client = MagicMock()
+    client.list_people.return_value = [
+        {"id": "p1", "name": "Alice", "isHidden": False, "isFavorite": False},
+    ]
+    client.random_assets.return_value = [_a("shot")]
+    sel = PeopleSelector(client, favorites_only=True)
+    sel.next_batch(1)
+    assert sel.current_scene == "Alice"
 
 
 # ── MemorySelector ──────────────────────────────────────────────────────

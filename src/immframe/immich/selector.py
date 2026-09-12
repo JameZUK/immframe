@@ -36,18 +36,51 @@ class AssetSelector(Protocol):
 
 
 class RandomSelector:
-    """Whole-library random via Immich `/search/random`.
+    """Random via Immich `/search/random`, optionally narrowed.
 
     Immich already returns a random sample, so we just pass `n` through.
+    The optional filters ride on the same request: `favorites` (starred
+    assets only), `min_rating` (EXIF/Immich star rating >= N), `album_ids`,
+    `tag_ids`. They compose — e.g. favourites within an album.
     """
 
-    def __init__(self, client: ImmichClient, *, include_videos: bool = True) -> None:
+    def __init__(
+        self,
+        client: ImmichClient,
+        *,
+        include_videos: bool = True,
+        favorites: bool = False,
+        min_rating: int | None = None,
+        album_ids: list[str] | None = None,
+        tag_ids: list[str] | None = None,
+    ) -> None:
         self._client = client
         self._include_videos = include_videos
+        self._favorites = bool(favorites)
+        self._min_rating = int(min_rating) if min_rating is not None else None
+        self._album_ids = list(album_ids) if album_ids else None
+        self._tag_ids = list(tag_ids) if tag_ids else None
+
+    @property
+    def current_scene(self) -> str | None:
+        if self._favorites:
+            return "Favourites"
+        if self._min_rating is not None:
+            return f"Rated {self._min_rating}+"
+        return None
 
     def next_batch(self, n: int) -> list[Asset]:
+        kwargs: dict = {"with_video": self._include_videos}
+        if self._favorites:
+            kwargs["favorites"] = True
+        if self._min_rating is not None:
+            kwargs["min_rating"] = self._min_rating
+        if self._album_ids:
+            kwargs["album_ids"] = self._album_ids
+        if self._tag_ids:
+            kwargs["tag_ids"] = self._tag_ids
         try:
-            return self._client.random_assets(n, with_video=self._include_videos)
+            return self._client.random_assets(n, **kwargs)
         except ImmichError as e:
             log.warning("random_assets failed: %s", e)
             return []
@@ -100,13 +133,16 @@ class SmartSelector:
     """CLIP smart-search-driven selection.
 
     Calls Immich's smart search per batch. `set_query()` takes effect on the
-    next call.
+    next call. CLIP ranking is deterministic, so each call draws a random
+    page from the top `pages` pages (page size = the batch size) — otherwise
+    a query would show the same top-N photos forever.
     """
 
-    def __init__(self, client: ImmichClient, query: str) -> None:
+    def __init__(self, client: ImmichClient, query: str, *, pages: int = 4) -> None:
         self._client = client
         self._lock = threading.Lock()
         self._query = query
+        self._pages = max(1, int(pages))
 
     def set_query(self, query: str) -> None:
         with self._lock:
@@ -117,8 +153,12 @@ class SmartSelector:
             q = self._query
         if not q:
             return []
+        page = random.randint(1, self._pages)
         try:
-            return self._client.search_smart(q, count=n)
+            out = self._client.search_smart(q, count=n, page=page)
+            if not out and page > 1:                     # fewer matches than pages
+                out = self._client.search_smart(q, count=n, page=1)
+            return out
         except ImmichError as e:
             log.warning("search_smart failed: %s", e)
             return []
@@ -147,20 +187,31 @@ class PeopleSelector:
     so the controller surfaces it the same way as scene mode.
     """
 
+    MAX_DRAWS = 8            # candidate draws per rotation before giving up
+
     def __init__(
         self,
         client: ImmichClient,
         person_ids: list[str] | None = None,
         *,
         pool_size: int = 25,
+        min_photos: int = 0,
+        favorites_only: bool = False,
     ) -> None:
         self._client = client
         self._explicit_ids = list(person_ids or [])
         self._pool_size = pool_size
+        # Auto-rotation only considers people with at least this many
+        # photos (counted via /search/statistics, lazily, cached) — a
+        # "person of the moment" with 3 photos makes a poor slideshow.
+        # Explicit `person_ids` are never filtered: the user asked for them.
+        self._min_photos = max(0, int(min_photos))
+        self._favorites_only = bool(favorites_only)
         self._lock = threading.Lock()
         # Lazily populated:
         self._person_index: dict[str, str] = {}      # id → name (for label exposure)
         self._rotation_ids: list[str] = []           # ids we cycle through
+        self._photo_counts: dict[str, int] = {}      # id → asset count (min_photos check)
         self._current_name: str | None = None
         self._pool: list[Asset] = []
 
@@ -176,6 +227,7 @@ class PeopleSelector:
             self._person_index = {}
             self._rotation_ids = []
             self._pool = []
+            # (photo counts stay cached — they don't depend on the selection)
 
     def next_batch(self, n: int) -> list[Asset]:
         with self._lock:
@@ -199,7 +251,9 @@ class PeopleSelector:
                 )
                 return
 
-        person_id = random.choice(self._rotation_ids)
+        person_id = self._draw_person()
+        if person_id is None:
+            return
         self._current_name = self._person_index.get(person_id) or person_id
         log.info("people rotation -> %r (%s)", self._current_name, person_id)
         try:
@@ -211,6 +265,43 @@ class PeopleSelector:
             pool = []
         random.shuffle(pool)
         self._pool = pool
+
+    def _draw_person(self) -> str | None:
+        """Pick a person for this rotation. With `min_photos` set (and no
+        explicit list) draw until someone with enough photos turns up; the
+        counts are one cheap /search/statistics call each and cached, so
+        the cost tails off to zero after a few rotations."""
+        if self._explicit_ids or self._min_photos <= 0:
+            return random.choice(self._rotation_ids)
+        eligible = [pid for pid in self._rotation_ids
+                    if self._photo_counts.get(pid, self._min_photos) >= self._min_photos]
+        if not eligible:
+            log.warning(
+                "people mode: nobody has >= %d photos (people_min_photos) — "
+                "lower the threshold or name more people in Immich",
+                self._min_photos,
+            )
+            return None
+        for _ in range(self.MAX_DRAWS):
+            pid = random.choice(eligible)
+            if pid not in self._photo_counts:
+                try:
+                    self._photo_counts[pid] = self._client.search_statistics(person_ids=[pid])
+                except ImmichError as e:
+                    log.debug("search_statistics(%s) failed: %s — assuming eligible", pid, e)
+                    return pid
+            n = self._photo_counts[pid]
+            if n >= self._min_photos:
+                return pid
+            log.debug("people: %r has %d photos (< %d) — skipping",
+                      self._person_index.get(pid, pid), n, self._min_photos)
+            eligible = [p for p in eligible if p != pid]
+            if not eligible:
+                break
+        # Everyone drawn so far was under the threshold; someone is better
+        # than nobody — fall back to the largest known.
+        known = [(self._photo_counts.get(p, 0), p) for p in self._rotation_ids]
+        return max(known)[1] if known else None
 
     def _resolve_rotation_ids(self) -> list[str]:
         if self._explicit_ids:
@@ -225,13 +316,23 @@ class PeopleSelector:
                 self._person_index = {pid: pid for pid in self._explicit_ids}
             return list(self._explicit_ids)
 
-        # No explicit list: rotate every named, non-hidden person
+        # No explicit list: rotate every named, non-hidden person (or only
+        # the ones starred as favourites in Immich when favorites_only).
         try:
             people = self._client.list_people()
         except ImmichError as e:
             log.warning("list_people failed: %s", e)
             return []
         named = [p for p in people if p.get("name") and not p.get("isHidden") and p.get("id")]
+        if self._favorites_only:
+            starred = [p for p in named if p.get("isFavorite")]
+            if starred:
+                named = starred
+            else:
+                log.warning(
+                    "people_favorites_only is set but no person is starred in "
+                    "Immich — rotating through all %d named people", len(named),
+                )
         if not named:
             return []
         self._person_index = {p["id"]: p["name"] for p in named}
@@ -523,12 +624,17 @@ class SceneSelector:
         *,
         pool_size: int = 25,
         force_mode: SourceMode | None = None,
+        pages: int = 4,
     ) -> None:
-        """`force_mode` skips auto-detect — useful for testing or if a user
-        wants to pin behaviour."""
+        """`force_mode` skips auto-detect — `selection.scene_source` in
+        config (or `source:` on a playlist entry) lands here. `pages`: for
+        the CLIP-backed sources (things / curated), each rotation fetches a
+        random page from the top `pages` pages of the ranked results so a
+        label doesn't always produce the same 25 photos."""
         self._client = client
         self._pool_size = pool_size
         self._force_mode = force_mode
+        self._pages = max(1, int(pages))
         self._lock = threading.Lock()
         # Resolved on first call:
         self._mode: SceneSelector.SourceMode | None = None
@@ -671,7 +777,11 @@ class SceneSelector:
     def _query_assets(self, label: str) -> list[Asset]:
         try:
             if self._mode in ("things", "curated"):
-                return self._client.search_smart(label, count=self._pool_size)
+                page = random.randint(1, self._pages)
+                out = self._client.search_smart(label, count=self._pool_size, page=page)
+                if not out and page > 1:                 # fewer matches than pages
+                    out = self._client.search_smart(label, count=self._pool_size, page=1)
+                return out
             if self._mode == "city":
                 # Random sample, not /search/metadata: that returns the same
                 # newest-first page for a city every rotation.

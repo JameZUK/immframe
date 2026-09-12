@@ -21,7 +21,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from .config import Config, SelectionMode
+from .config import SCENE_SOURCES, SELECTION_MODES, Config, SelectionMode
 from .immich.client import ImmichClient
 from .immich.models import Asset, AssetKind
 from .immich.prefetch import PrefetchWorker
@@ -157,6 +157,11 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 def _iclamp(value: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
+
+
+def _scene_force_mode(source: str):
+    """Config `scene_source` → SceneSelector.force_mode ("auto" = detect)."""
+    return None if source == "auto" else source
 
 
 def _check_display_environment(*, video_enabled: bool) -> None:
@@ -574,9 +579,8 @@ class Controller:
 
     @selection_mode.setter
     def selection_mode(self, mode: SelectionMode) -> None:
-        valid = ("random", "album", "smart", "scene", "people", "memory", "recent", "playlist")
-        if mode not in valid:
-            raise ValueError(f"unknown selection_mode: {mode!r}; valid: {valid}")
+        if mode not in SELECTION_MODES:
+            raise ValueError(f"unknown selection_mode: {mode!r}; valid: {SELECTION_MODES}")
         self._selection_mode = mode
         self._selector = self._build_selector(mode)
         self._prefetch.set_selector(self._selector)
@@ -819,16 +823,31 @@ class Controller:
             pass
 
     def _build_selector(self, mode: SelectionMode) -> AssetSelector:
+        sel_cfg = self._config.selection
         if mode == "random":
-            return RandomSelector(self._client, include_videos=self._config.video.enabled)
+            return RandomSelector(
+                self._client, include_videos=self._config.video.enabled,
+                min_rating=sel_cfg.min_rating,
+            )
+        if mode == "favorites":
+            return RandomSelector(
+                self._client, include_videos=self._config.video.enabled, favorites=True,
+            )
         if mode == "album":
             return AlbumSelector(self._client, self._album_ids)
         if mode == "smart":
-            return SmartSelector(self._client, self._smart_query)
+            return SmartSelector(self._client, self._smart_query, pages=sel_cfg.smart_pages)
         if mode == "scene":
-            return SceneSelector(self._client)
+            return SceneSelector(
+                self._client, force_mode=_scene_force_mode(sel_cfg.scene_source),
+                pages=sel_cfg.smart_pages,
+            )
         if mode == "people":
-            return PeopleSelector(self._client, self._people_ids)
+            return PeopleSelector(
+                self._client, self._people_ids,
+                min_photos=sel_cfg.people_min_photos,
+                favorites_only=sel_cfg.people_favorites_only,
+            )
         if mode == "memory":
             return MemorySelector(self._client)
         if mode == "recent":
@@ -900,16 +919,41 @@ class Controller:
         """Build a sub-selector for a playlist entry. Each entry may override
         controller-level config (album_ids, people_ids, days, etc.)."""
         mode = entry.get("mode")
-        if mode == "random":
-            return RandomSelector(self._client, include_videos=self._config.video.enabled)
+        sel_cfg = self._config.selection
+        if mode in ("random", "favorites"):
+            # Per-entry narrowing: `favorites`, `min_rating`, `album_ids`,
+            # `tag_ids` all ride on the same /search/random call.
+            min_rating = entry.get("min_rating", sel_cfg.min_rating)
+            if min_rating is not None:
+                min_rating = _iclamp(int(min_rating), 1, 5)
+            return RandomSelector(
+                self._client, include_videos=self._config.video.enabled,
+                favorites=(mode == "favorites") or bool(entry.get("favorites", False)),
+                min_rating=min_rating,
+                album_ids=list(entry.get("album_ids", [])) or None,
+                tag_ids=list(entry.get("tag_ids", [])) or None,
+            )
         if mode == "album":
             return AlbumSelector(self._client, list(entry.get("album_ids", self._album_ids)))
         if mode == "smart":
-            return SmartSelector(self._client, entry.get("smart_query", self._smart_query))
+            return SmartSelector(
+                self._client, entry.get("smart_query", self._smart_query),
+                pages=int(entry.get("pages", sel_cfg.smart_pages)),
+            )
         if mode == "scene":
-            return SceneSelector(self._client)
+            source = str(entry.get("source", sel_cfg.scene_source))
+            if source not in SCENE_SOURCES:
+                raise ValueError(f"scene source must be one of {SCENE_SOURCES}; got {source!r}")
+            return SceneSelector(
+                self._client, force_mode=_scene_force_mode(source),
+                pages=int(entry.get("pages", sel_cfg.smart_pages)),
+            )
         if mode == "people":
-            return PeopleSelector(self._client, list(entry.get("people_ids", self._people_ids)))
+            return PeopleSelector(
+                self._client, list(entry.get("people_ids", self._people_ids)),
+                min_photos=int(entry.get("min_photos", sel_cfg.people_min_photos)),
+                favorites_only=bool(entry.get("favorites_only", sel_cfg.people_favorites_only)),
+            )
         if mode == "memory":
             return MemorySelector(self._client)
         if mode == "recent":
