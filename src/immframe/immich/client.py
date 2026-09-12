@@ -118,18 +118,34 @@ class ImmichClient:
         return isinstance(data, dict) and data.get("res") == "pong"
 
     # ── Asset selection ─────────────────────────────────────────────────
-    def random_assets(self, count: int, *, with_video: bool = True) -> list[Asset]:
+    def random_assets(
+        self,
+        count: int,
+        *,
+        with_video: bool = True,
+        taken_after: datetime | None = None,
+        created_after: datetime | None = None,
+        city: str | None = None,
+        person_ids: Iterable[str] | None = None,
+    ) -> list[Asset]:
         """POST /search/random — returns array of asset DTOs directly.
+
+        Accepts the same structured filters as `search_metadata` (city,
+        person, upload/capture date). Unlike `/search/metadata`, whose
+        ordering is fixed (newest first) and which only ever hands back page
+        1 here, this returns a fresh random sample on every call — so
+        selectors that draw a pool per rotation get variety instead of the
+        same top-N each time.
 
         Always sets `withExif: true` and `withPeople: true` — without these
         flags Immich strips exifInfo / people from the response, leaving
         camera, city, country, taken_at and overlay-people fields null.
         """
-        body: dict[str, Any] = {
-            "size": count,
-            "withExif": True,
-            "withPeople": True,
-        }
+        body = _search_body(
+            count,
+            taken_after=taken_after, created_after=created_after,
+            city=city, person_ids=person_ids,
+        )
         if not with_video:
             body["type"] = "IMAGE"
         data = self._post("/search/random", json=body)
@@ -165,28 +181,18 @@ class ImmichClient:
 
         `taken_*` filters by the photo's EXIF capture time.
         `created_*` filters by upload time to Immich.
+
+        Note: results come back in a fixed order (newest first) and only the
+        first page is fetched, so repeated calls with the same filters return
+        the same assets. Use `random_assets(...)` with filters when a varied
+        sample is what's wanted.
         """
-        body: dict[str, Any] = {
-            "size": count,
-            "withExif": True,
-            "withPeople": True,
-        }
-        if taken_after is not None:
-            body["takenAfter"] = taken_after.isoformat()
-        if taken_before is not None:
-            body["takenBefore"] = taken_before.isoformat()
-        if created_after is not None:
-            body["createdAfter"] = created_after.isoformat()
-        if created_before is not None:
-            body["createdBefore"] = created_before.isoformat()
-        if city is not None:
-            body["city"] = city
-        if country is not None:
-            body["country"] = country
-        if tag_ids is not None:
-            body["tagIds"] = list(tag_ids)
-        if person_ids is not None:
-            body["personIds"] = list(person_ids)
+        body = _search_body(
+            count,
+            taken_after=taken_after, taken_before=taken_before,
+            created_after=created_after, created_before=created_before,
+            city=city, country=country, tag_ids=tag_ids, person_ids=person_ids,
+        )
         data = self._post("/search/metadata", json=body)
         return _items_from_search(data)
 
@@ -399,6 +405,44 @@ _KIND_MAP = {
     "AUDIO": AssetKind.OTHER,
     "OTHER": AssetKind.OTHER,
 }
+
+
+def _search_body(
+    count: int,
+    *,
+    taken_after: datetime | None = None,
+    taken_before: datetime | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    city: str | None = None,
+    country: str | None = None,
+    tag_ids: Iterable[str] | None = None,
+    person_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Request body shared by /search/metadata and /search/random (both take
+    Immich's BaseSearchDto filters)."""
+    body: dict[str, Any] = {
+        "size": count,
+        "withExif": True,
+        "withPeople": True,
+    }
+    if taken_after is not None:
+        body["takenAfter"] = taken_after.isoformat()
+    if taken_before is not None:
+        body["takenBefore"] = taken_before.isoformat()
+    if created_after is not None:
+        body["createdAfter"] = created_after.isoformat()
+    if created_before is not None:
+        body["createdBefore"] = created_before.isoformat()
+    if city is not None:
+        body["city"] = city
+    if country is not None:
+        body["country"] = country
+    if tag_ids is not None:
+        body["tagIds"] = list(tag_ids)
+    if person_ids is not None:
+        body["personIds"] = list(person_ids)
+    return body
 
 
 def _items_from_search(data: Any) -> list[Asset]:

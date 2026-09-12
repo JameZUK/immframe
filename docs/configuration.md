@@ -61,9 +61,9 @@ immich:
 - **album** — Random within one or more albums. Curated.
 - **smart** — Immich's CLIP smart-search. Free-text. Requires the smart-search ML jobs to have run on your library.
 - **scene** — Picks a random label that Immich has auto-discovered (*beach*, *Amsterdam*, *wedding*, …) and slideshows ~25 photos from it before rotating. **Multi-source with auto-fallback** in this priority order: `things` (CLIP scenes) → cities → curated CLIP queries. The curated fallback works whenever Immich's smart search is enabled, even when `/search/explore` doesn't surface anything useful.
-- **people** — Slideshow of photos featuring specific people. With `people_ids` empty, rotates through every named person in the library (one person's photos at a time). With UUIDs set, restricts to those. Find UUIDs via `immframe list-people`.
+- **people** — Slideshow of photos featuring specific people. With `people_ids` empty, rotates through every named person in the library (one person's photos at a time). With UUIDs set, restricts to those. Each rotation is a fresh random sample of that person's photos. Find UUIDs via `immframe list-people`.
 - **memory** — On-this-day. Uses Immich's `/memories` endpoint (the same "5 years ago" feature on the Immich home screen). Picks a random memory and shows its photos, then rotates. Zero config.
-- **recent** — Photos uploaded (or taken) recently. Configurable via `recent_days` and `recent_field`. Re-queries each rotation so newly-uploaded photos surface within minutes.
+- **recent** — Photos uploaded (or taken) recently. Configurable via `recent_days` and `recent_field`. Draws a fresh random sample from the window each rotation, so newly-uploaded photos surface within minutes. If the window holds fewer photos than one rotation, a playlist entry shows each of them once and moves on rather than repeating them to meet its `count`.
 - **playlist** — Round-robins through a sequence of other modes with configurable batch sizes. See below.
 
 ### Playlist mode

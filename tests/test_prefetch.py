@@ -105,6 +105,47 @@ def test_video_poster_download_failure_falls_back_to_none():
     assert asset.id == "v"
 
 
+def test_same_asset_queued_twice_gets_distinct_files():
+    """Regression: a selector may hand back the same asset in consecutive
+    batches (small "recent" windows, playlist repeats). Each queue item must
+    own its own file — the controller deletes the previous slide's file after
+    loading the next, so a shared `{asset.id}.jpg` path would vanish before
+    the second copy is shown (viewer then re-displays the previous photo)."""
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("dup")], [_a("dup")], []]
+    client = _client_writing_bytes()
+    w = PrefetchWorker(selector, client, queue_size=5, empty_backoff_s=0.01)
+    w.start()
+    try:
+        item1 = w.next(timeout=2.0)
+        item2 = w.next(timeout=2.0)
+        assert item1 is not None and item2 is not None
+        assert item1[1].id == item2[1].id == "dup"
+        assert item1[0] != item2[0]
+        # Simulate the controller: show #1, then load #2 and unlink #1.
+        item1[0].unlink()
+        assert item2[0].exists()
+        assert item2[0].read_bytes() == b"img-dup"
+    finally:
+        w.stop(timeout=2.0)
+
+
+def test_video_poster_files_are_distinct_per_item():
+    selector = MagicMock()
+    selector.next_batch.side_effect = [[_a("v", AssetKind.VIDEO), _a("v", AssetKind.VIDEO)], []]
+    client = _client_writing_bytes()
+    w = PrefetchWorker(selector, client, queue_size=5, empty_backoff_s=0.01)
+    w.start()
+    try:
+        item1 = w.next(timeout=2.0)
+        item2 = w.next(timeout=2.0)
+        assert item1 is not None and item2 is not None
+        assert item1[0] is not None and item2[0] is not None
+        assert item1[0] != item2[0]
+    finally:
+        w.stop(timeout=2.0)
+
+
 def test_drain_removes_pending_files():
     selector = MagicMock()
     selector.next_batch.side_effect = [[_a("a"), _a("b")], []]

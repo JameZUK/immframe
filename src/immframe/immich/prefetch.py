@@ -215,8 +215,12 @@ class PrefetchWorker:
                     return
 
     def _fetch(self, asset: Asset) -> QueueItem | None:
+        # Suffix with a per-item sequence number: the same asset can be queued
+        # more than once (small "recent" windows, playlist repeats), and the
+        # controller unlinks the previous slide's file after loading the next
+        # one — a shared path would delete the second copy before it's shown.
         if asset.kind == AssetKind.IMAGE:
-            dest = self._tmp_dir / f"{asset.id}.jpg"
+            dest = self._tmp_dir / f"{asset.id}-{self._next_seq()}.jpg"
             try:
                 self._client.download_preview(asset.id, dest)
             except ImmichError as e:
@@ -228,7 +232,7 @@ class PrefetchWorker:
             # renders it via pi3d (matted, faded-in) before MPV takes over
             # for playback. If the poster download fails we still play the
             # video, just without the matted pre-roll.
-            dest = self._tmp_dir / f"{asset.id}.poster.jpg"
+            dest = self._tmp_dir / f"{asset.id}-{self._next_seq()}.poster.jpg"
             try:
                 self._client.download_preview(asset.id, dest)
                 return (dest, asset, None)

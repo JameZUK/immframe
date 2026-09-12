@@ -138,8 +138,10 @@ class PeopleSelector:
     a long, varied tour of every family member; with a curated list it
     becomes a focused "just my kids" or "Alice + Bob" frame.
 
-    Uses `/search/metadata` with `personIds` filter — server-side. We never
-    download the full library and filter client-side.
+    Uses `/search/random` with a `personIds` filter — server-side, and a
+    fresh random sample per rotation (`/search/metadata` would hand back the
+    same newest-first page every time). We never download the full library
+    and filter client-side.
 
     `current_scene` exposes the currently-rotating person's NAME (not ID)
     so the controller surfaces it the same way as scene mode.
@@ -201,11 +203,11 @@ class PeopleSelector:
         self._current_name = self._person_index.get(person_id) or person_id
         log.info("people rotation -> %r (%s)", self._current_name, person_id)
         try:
-            pool = self._client.search_metadata(
-                person_ids=[person_id], count=self._pool_size,
+            pool = self._client.random_assets(
+                self._pool_size, person_ids=[person_id],
             )
         except ImmichError as e:
-            log.warning("people search_metadata for %s failed: %s", person_id, e)
+            log.warning("people random_assets for %s failed: %s", person_id, e)
             pool = []
         random.shuffle(pool)
         self._pool = pool
@@ -309,8 +311,17 @@ class RecentSelector:
     """Random within recently-uploaded photos.
 
     Looks at assets uploaded (`createdAfter`) to Immich within the last
-    `days` window. Re-queries on every rotation so newly-uploaded photos
-    surface quickly.
+    `days` window. Each rotation draws a fresh random sample of up to
+    `pool_size` assets from that window (via `/search/random`, so it is a
+    different sample each time), shuffles it and serves it without
+    replacement; the window is re-queried when the pool runs dry, so newly
+    uploaded photos surface quickly.
+
+    Small windows: when the sample comes back short (fewer than `pool_size`
+    — i.e. it *is* the whole window), the selector returns `[]` once after
+    serving it. In a playlist that advances to the next entry instead of
+    replaying the same few photos until the entry's count is met; standalone
+    the worker just backs off briefly and a new rotation begins.
 
     For "taken in the last N days" instead of "uploaded in the last N
     days", set `field="taken"`.
@@ -330,23 +341,48 @@ class RecentSelector:
         self._days = max(1, int(days))
         self._field = field
         self._pool_size = pool_size
+        self._lock = threading.Lock()
+        self._pool: list[Asset] = []
+        self._pool_is_window = False    # last sample was short: it's the whole window
+        # True once a whole-window sample has been fully served; the next
+        # call yields [] and clears it.
+        self._window_done = False
 
     @property
     def current_scene(self) -> str | None:
         return f"Last {self._days} days"
 
     def next_batch(self, n: int) -> list[Asset]:
+        with self._lock:
+            if not self._pool:
+                if self._window_done:
+                    self._window_done = False
+                    return []
+                self._refill()
+                if not self._pool:
+                    return []
+            take = min(n, len(self._pool))
+            out = self._pool[:take]
+            self._pool = self._pool[take:]
+            if not self._pool and self._pool_is_window:
+                self._window_done = True
+            return out
+
+    def _refill(self) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self._days)
         try:
             if self._field == "taken":
-                assets = self._client.search_metadata(taken_after=cutoff, count=n)
+                assets = self._client.random_assets(self._pool_size, taken_after=cutoff)
             else:
-                assets = self._client.search_metadata(created_after=cutoff, count=n)
+                assets = self._client.random_assets(self._pool_size, created_after=cutoff)
         except ImmichError as e:
-            log.warning("recent search failed: %s", e)
-            return []
+            log.warning("recent random_assets failed: %s", e)
+            assets = []
         random.shuffle(assets)
-        return assets
+        self._pool = assets
+        # A short sample means the window has fewer assets than pool_size —
+        # we're holding all of it.
+        self._pool_is_window = bool(assets) and len(assets) < self._pool_size
 
 
 class PlaylistSelector:
@@ -464,8 +500,8 @@ class SceneSelector:
            doesn't surface anything useful)
 
     Each rotation picks a random label from the chosen source and fetches a
-    pool of matching assets — via CLIP smart search, city-filter metadata
-    search, or person-filter metadata search, depending on the source.
+    pool of matching assets — via CLIP smart search (things / curated) or a
+    city-filtered random sample (city), depending on the source.
 
     `current_scene` exposes the active label so the controller can publish
     it for HA / dashboard display.
@@ -601,7 +637,9 @@ class SceneSelector:
             if self._mode in ("things", "curated"):
                 return self._client.search_smart(label, count=self._pool_size)
             if self._mode == "city":
-                return self._client.search_metadata(city=label, count=self._pool_size)
+                # Random sample, not /search/metadata: that returns the same
+                # newest-first page for a city every rotation.
+                return self._client.random_assets(self._pool_size, city=label)
         except ImmichError as e:
             log.warning(
                 "scene[%s] asset query for %r failed: %s",

@@ -143,20 +143,37 @@ def test_scene_prefers_things_facet_when_present():
 
 def test_scene_uses_city_when_things_missing():
     """The bug from the field: Immich only surfaces city facets. Scene mode
-    should use them via search_metadata(city=...) instead of giving up."""
+    should use them via a city-filtered random sample instead of giving up."""
     client = MagicMock()
     client.explore.return_value = {"exifInfo.city": ["Amsterdam", "Aberfeldy"]}
-    client.search_metadata.return_value = [_a("city-a")]
+    client.random_assets.return_value = [_a("city-a")]
 
     sel = SceneSelector(client)
     batch = sel.next_batch(5)
 
     assert sel.mode == "city"
-    # Used the city-filter endpoint, NOT smart search
+    # Used a city-filtered random sample, NOT smart search
     client.search_smart.assert_not_called()
-    city = client.search_metadata.call_args.kwargs["city"]
+    city = client.random_assets.call_args.kwargs["city"]
     assert city in ("Amsterdam", "Aberfeldy")
     assert batch[0].id == "city-a"
+
+
+def test_scene_city_resamples_each_rotation():
+    """/search/metadata returns the same newest-first page for a city every
+    time; a random sample must be drawn per rotation instead."""
+    client = MagicMock()
+    client.explore.return_value = {"exifInfo.city": ["Amsterdam"]}
+    client.random_assets.side_effect = [[_a("a1"), _a("a2")], [_a("b1"), _a("b2")]]
+
+    sel = SceneSelector(client, pool_size=2)
+    first = sel.next_batch(2)
+    second = sel.next_batch(2)
+
+    assert {a.id for a in first} == {"a1", "a2"}
+    assert {a.id for a in second} == {"b1", "b2"}
+    assert client.random_assets.call_count == 2
+    client.search_metadata.assert_not_called()
 
 
 def test_scene_falls_back_to_curated_when_only_people_present():
@@ -187,6 +204,7 @@ def test_scene_falls_back_to_curated_when_nothing_useful():
 
     assert sel.mode == "curated"
     client.search_metadata.assert_not_called()
+    client.random_assets.assert_not_called()
     chosen = client.search_smart.call_args.args[0]
     assert chosen in CURATED_SCENE_QUERIES
     assert batch[0].id == "curated-hit"
@@ -244,12 +262,12 @@ def test_people_explicit_ids_filters_to_those():
         {"id": "p2", "name": "Bob", "isHidden": False},
         {"id": "px", "name": "OtherPerson", "isHidden": False},
     ]
-    client.search_metadata.return_value = [_a("shot")]
+    client.random_assets.return_value = [_a("shot")]
 
     sel = PeopleSelector(client, person_ids=["p1", "p2"])
     batch = sel.next_batch(2)
 
-    pid = client.search_metadata.call_args.kwargs["person_ids"]
+    pid = client.random_assets.call_args.kwargs["person_ids"]
     assert pid in (["p1"], ["p2"])
     assert sel.current_scene in ("Alice", "Bob")
     assert batch[0].id == "shot"
@@ -264,11 +282,11 @@ def test_people_empty_ids_rotates_all_named():
         {"id": "p3", "name": "", "isHidden": False},        # unnamed
         {"id": "p4", "name": "Charlie", "isHidden": True},  # hidden
     ]
-    client.search_metadata.return_value = [_a("shot")]
+    client.random_assets.return_value = [_a("shot")]
 
     sel = PeopleSelector(client)                # empty list
     sel.next_batch(2)
-    person_ids = client.search_metadata.call_args.kwargs["person_ids"]
+    person_ids = client.random_assets.call_args.kwargs["person_ids"]
     # Only named, non-hidden are eligible
     assert person_ids[0] in ("p1", "p2")
 
@@ -279,15 +297,15 @@ def test_people_set_person_ids_drains_pool():
         {"id": "p1", "name": "Alice", "isHidden": False},
         {"id": "p2", "name": "Bob", "isHidden": False},
     ]
-    client.search_metadata.return_value = [_a("shot")]
+    client.random_assets.return_value = [_a("shot")]
 
     sel = PeopleSelector(client, person_ids=["p1"])
     sel.next_batch(1)
-    client.search_metadata.reset_mock()
+    client.random_assets.reset_mock()
 
     sel.set_person_ids(["p2"])
     sel.next_batch(1)
-    assert client.search_metadata.call_args.kwargs["person_ids"] == ["p2"]
+    assert client.random_assets.call_args.kwargs["person_ids"] == ["p2"]
 
 
 def test_people_empty_library_returns_empty():
@@ -303,9 +321,26 @@ def test_people_metadata_error_returns_empty():
     client.list_people.return_value = [
         {"id": "p1", "name": "Alice", "isHidden": False},
     ]
-    client.search_metadata.side_effect = ImmichError("upstream")
+    client.random_assets.side_effect = ImmichError("upstream")
     sel = PeopleSelector(client)
     assert sel.next_batch(5) == []
+
+
+def test_people_resamples_each_rotation():
+    """Each rotation is a fresh random sample of the person, not the same
+    newest-first page from /search/metadata."""
+    client = MagicMock()
+    client.list_people.return_value = [{"id": "p1", "name": "Alice", "isHidden": False}]
+    client.random_assets.side_effect = [[_a("a1"), _a("a2")], [_a("b1"), _a("b2")]]
+
+    sel = PeopleSelector(client, person_ids=["p1"], pool_size=2)
+    first = sel.next_batch(2)
+    second = sel.next_batch(2)
+
+    assert {a.id for a in first} == {"a1", "a2"}
+    assert {a.id for a in second} == {"b1", "b2"}
+    assert client.random_assets.call_args.args[0] == 2          # pool_size
+    client.search_metadata.assert_not_called()
 
 
 # ── MemorySelector ──────────────────────────────────────────────────────
@@ -365,24 +400,94 @@ def test_memory_error_returns_empty():
 
 def test_recent_uses_created_after_by_default():
     client = MagicMock()
-    client.search_metadata.return_value = [_a("r1"), _a("r2")]
+    client.random_assets.return_value = [_a("r1"), _a("r2")]
     sel = RecentSelector(client, days=14)
     batch = sel.next_batch(5)
     assert {a.id for a in batch} == {"r1", "r2"}
-    # Verify it asked for createdAfter, not takenAfter
-    kwargs = client.search_metadata.call_args.kwargs
+    # Verify it asked for createdAfter, not takenAfter — and via the random
+    # endpoint, not the fixed-order metadata search.
+    kwargs = client.random_assets.call_args.kwargs
     assert "created_after" in kwargs
     assert "taken_after" not in kwargs
+    client.search_metadata.assert_not_called()
 
 
 def test_recent_with_taken_field():
     client = MagicMock()
-    client.search_metadata.return_value = [_a("r")]
+    client.random_assets.return_value = [_a("r")]
     sel = RecentSelector(client, days=7, field="taken")
     sel.next_batch(5)
-    kwargs = client.search_metadata.call_args.kwargs
+    kwargs = client.random_assets.call_args.kwargs
     assert "taken_after" in kwargs
     assert "created_after" not in kwargs
+
+
+def test_recent_serves_pool_without_replacement_then_resamples():
+    """One query per rotation (pool_size), served across batches; a fresh
+    random sample once the pool runs dry."""
+    client = MagicMock()
+    client.random_assets.side_effect = [
+        [_a("a1"), _a("a2"), _a("a3"), _a("a4")],
+        [_a("b1"), _a("b2"), _a("b3"), _a("b4")],
+    ]
+    sel = RecentSelector(client, days=7, pool_size=4)
+    first = sel.next_batch(2)
+    second = sel.next_batch(2)
+    assert client.random_assets.call_count == 1
+    assert {a.id for a in first} | {a.id for a in second} == {"a1", "a2", "a3", "a4"}
+    assert not ({a.id for a in first} & {a.id for a in second})
+    third = sel.next_batch(2)
+    assert client.random_assets.call_count == 2
+    assert client.random_assets.call_args.args[0] == 4          # pool_size
+    assert {a.id for a in third} <= {"b1", "b2", "b3", "b4"}
+
+
+def test_recent_small_window_signals_exhaustion_once():
+    """A short sample means the window is smaller than pool_size — after
+    serving all of it, return [] once (so a playlist advances) rather than
+    immediately replaying the same few photos."""
+    client = MagicMock()
+    client.random_assets.return_value = [_a("x"), _a("y"), _a("z")]
+    sel = RecentSelector(client, days=7, pool_size=25)
+    assert {a.id for a in sel.next_batch(5)} == {"x", "y", "z"}
+    assert sel.next_batch(5) == []
+    assert client.random_assets.call_count == 1
+    # ...and then a new rotation starts.
+    assert {a.id for a in sel.next_batch(5)} == {"x", "y", "z"}
+    assert client.random_assets.call_count == 2
+
+
+def test_recent_full_window_does_not_signal_exhaustion():
+    client = MagicMock()
+    client.random_assets.return_value = [_a("x"), _a("y"), _a("z")]
+    sel = RecentSelector(client, days=7, pool_size=3)              # sample == pool_size
+    assert len(sel.next_batch(5)) == 3
+    assert len(sel.next_batch(5)) == 3                             # refilled, no []
+
+
+def test_recent_error_returns_empty_then_recovers():
+    client = MagicMock()
+    client.random_assets.side_effect = [ImmichError("upstream"), [_a("ok")]]
+    sel = RecentSelector(client, days=7)
+    assert sel.next_batch(5) == []
+    assert sel.next_batch(5)[0].id == "ok"
+
+
+def test_playlist_recent_entry_advances_when_window_is_small():
+    """The field bug: `{mode: recent, count: 10}` with only 3 uploads in the
+    window used to re-show those 3 photos until the count was met (and the
+    collage entry after it tiled the same 3 again). Now the entry yields its
+    3 and the playlist moves on."""
+    recent_client = MagicMock()
+    recent_client.random_assets.return_value = [_a("r1"), _a("r2"), _a("r3")]
+    recent = RecentSelector(recent_client, days=7, pool_size=25)
+    other = MagicMock()
+    other.next_batch.side_effect = lambda n: [_a("other")] * n
+
+    pl = PlaylistSelector([(recent, 10), (other, 2)])
+    assert {a.id for a in pl.next_batch(5)} == {"r1", "r2", "r3"}
+    assert [a.id for a in pl.next_batch(5)] == ["other", "other"]   # advanced, quota 2
+    assert recent_client.random_assets.call_count == 1
 
 
 def test_recent_rejects_bad_field():
