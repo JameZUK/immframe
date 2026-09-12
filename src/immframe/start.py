@@ -108,6 +108,10 @@ def _build_parser() -> argparse.ArgumentParser:
     random_p.add_argument("count", type=int, nargs="?", default=5)
 
     sub.add_parser(
+        "doctor",
+        help="Check Immich (reachability, permissions, server settings) and the local kiosk; print fixes",
+    )
+    sub.add_parser(
         "explore",
         help="Dump Immich's /search/explore facets and /search/cities (scene-mode debug)",
     )
@@ -222,6 +226,9 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return _cmd_immich_random(config, args.count)
     if cmd == "explore":
         return _cmd_immich_explore(config)
+    if cmd == "doctor":
+        from .doctor import run as doctor_run
+        return doctor_run(config, config_path=Config._locate(args.config))
     if cmd == "list-people":
         return _cmd_immich_list_people(config)
 

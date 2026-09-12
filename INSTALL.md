@@ -212,6 +212,7 @@ immframe show-text title,date,location
 immframe clock on|off
 immframe immich-ping         # verify Immich reachable
 immframe random 5            # list 5 random asset IDs from Immich
+immframe doctor              # check Immich (reachability, key permissions, server settings) + the local kiosk; prints fixes
 immframe explore             # dump Immich's /search/explore facets (scene-mode debug)
 ```
 
@@ -268,6 +269,7 @@ systemctl --user restart immframe          # if running under systemd
 | `ImmichError: ... 401` | API key wrong or `immich.api_key` empty in config |
 | `ImmichError: ... ConnectionError` | URL wrong, or Immich unreachable from the Pi |
 | Black screen forever | No assets matched the current selection — try `--log-level DEBUG` |
+| Anything odd at all | Run `immframe doctor` first — it checks Immich reachability, what the API key is allowed to do, the server's preview / transcoding / CLIP settings, and the local kiosk (display session, hardware decoders, cache location, labwc files) and prints the fix for each finding. |
 | Scene mode produces no slides | Immich hasn't finished CLIP classification yet — check Immich → Administration → Jobs. Run `immframe explore` to see what facets Immich is exposing. |
 | Dashboard / API responds 401 | Auth credentials mismatch between config and request |
 | Dashboard unreachable | `control.http.bind` is `127.0.0.1` (default); set to `0.0.0.0` for LAN access |

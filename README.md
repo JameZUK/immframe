@@ -61,6 +61,7 @@ UX picframe got right.
   (curate the frame from the sofa — hides instantly, stars/archives in
   Immich when the key can write)
 - CLI for ops:
+  `immframe doctor` (checks Immich + the kiosk and prints fixes),
   `immframe state`, `immframe pause`, `immframe next`,
   `immframe brightness 0.5`, `immframe mode smart`,
   `immframe query "sunsets"`, `immframe random 5`, etc.
