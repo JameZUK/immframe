@@ -60,6 +60,15 @@ class RandomSelector:
         self._min_rating = int(min_rating) if min_rating is not None else None
         self._album_ids = list(album_ids) if album_ids else None
         self._tag_ids = list(tag_ids) if tag_ids else None
+        # Filtered draws that come back short mean the matching set is
+        # smaller than one batch; yield [] once afterwards so a playlist
+        # moves on instead of re-showing the same few until `count` is met.
+        self._exhausted = False
+
+    @property
+    def filtered(self) -> bool:
+        return bool(self._favorites or self._min_rating is not None
+                    or self._album_ids or self._tag_ids)
 
     @property
     def current_scene(self) -> str | None:
@@ -79,11 +88,17 @@ class RandomSelector:
             kwargs["album_ids"] = self._album_ids
         if self._tag_ids:
             kwargs["tag_ids"] = self._tag_ids
+        if self._exhausted:
+            self._exhausted = False
+            return []
         try:
-            return self._client.random_assets(n, **kwargs)
+            out = self._client.random_assets(n, **kwargs)
         except ImmichError as e:
             log.warning("random_assets failed: %s", e)
             return []
+        if self.filtered and out and len(out) < n:
+            self._exhausted = True
+        return out
 
 
 class AlbumSelector:

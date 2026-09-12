@@ -147,6 +147,28 @@ def test_random_selector_passes_filters():
     assert sel.current_scene == "Favourites"
 
 
+def test_filtered_random_signals_exhaustion_after_short_batch():
+    """One starred photo + `{mode: favorites, count: 5}` must not show that
+    photo five times: a short batch yields [] next so a playlist advances."""
+    client = MagicMock()
+    client.random_assets.return_value = [_a("only")]
+    sel = RandomSelector(client, favorites=True)
+    assert [a.id for a in sel.next_batch(5)] == ["only"]
+    assert sel.next_batch(5) == []
+    assert [a.id for a in sel.next_batch(5)] == ["only"]        # new round
+    other = MagicMock(); other.next_batch.side_effect = lambda n: [_a("o")] * n
+    pl = PlaylistSelector([(RandomSelector(client, favorites=True), 5), (other, 2)])
+    assert [a.id for a in pl.next_batch(5)] == ["only"]
+    assert [a.id for a in pl.next_batch(5)] == ["o", "o"]
+
+
+def test_unfiltered_random_never_signals_exhaustion():
+    client = MagicMock()
+    client.random_assets.return_value = [_a("x")]              # tiny library
+    sel = RandomSelector(client)
+    assert sel.next_batch(5) and sel.next_batch(5) and sel.next_batch(5)
+
+
 def test_random_selector_plain_has_no_label():
     assert RandomSelector(MagicMock()).current_scene is None
     assert RandomSelector(MagicMock(), min_rating=3).current_scene == "Rated 3+"
