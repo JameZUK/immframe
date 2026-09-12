@@ -365,7 +365,7 @@ ramdisk).
 | `use_glx` | bool | `false` | Force GLX on X servers. Set `false` on a console / KMS setup. |
 | `use_sdl2` | bool | `true` | Use pi3d's SDL2 display backend. Required when there's no X server. |
 | `display_hdmi` | string | `HDMI-A-1` | Which HDMI port to address for power control. `HDMI-A-2` for the second port on a Pi 4/5. |
-| `display_power` | enum 0–3 | `0` | How to turn the display on/off: `0` = `vcgencmd` (legacy Pi), `1` = `xset` (X server), `2` = `wlr-randr` (Wayland), `3` = write to `/sys/class/drm/card?-<hdmi>/status` (works for multi-screen). |
+| `display_power` | enum 0–3 | `2` | How the HA / HTTP *Display* switch turns the screen on/off: `2` = `wlr-randr` (Wayland / labwc — the supported kiosk setup; needs `wlr-randr` installed, which `setup-display.sh` does), `1` = `xset` DPMS (X server), `0` = `vcgencmd display_power` (legacy firmware driver only — a silent no-op on the KMS driver current Pi OS uses), `3` = write to `/sys/class/drm/card?-<hdmi>/status` (multi-screen). `display_hdmi` names the output (`HDMI-A-1`). |
 
 ### Miscellaneous
 

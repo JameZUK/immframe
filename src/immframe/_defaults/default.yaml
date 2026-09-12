@@ -69,6 +69,9 @@ viewer:
   show_text_fm: "%b %-d, %Y"
   show_text: "title caption name date location"   # space-separated keys:
                                                    # title | caption | name | date | location | folder
+  display_power: 2                         # how the Display switch powers the screen: 2 = wlr-randr (labwc),
+                                            # 1 = xset (X11), 0 = vcgencmd (legacy), 3 = /sys/class/drm
+  display_hdmi: HDMI-A-1                   # output name for display_power 2 / 3
 
 control:
   # Phase-2 surface — wiring in progress. Disabled by default.

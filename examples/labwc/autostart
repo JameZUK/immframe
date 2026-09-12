@@ -4,6 +4,15 @@
 #
 # Runs when labwc itself starts. Use to launch immframe and any helpers.
 
-# Start the slideshow; pipe output to the journal under tag 'immframe' so
-# you can read live logs with:    journalctl -t immframe -f
-~/immframe/.venv/bin/immframe 2>&1 | systemd-cat -t immframe &
+# Start the slideshow under a restart loop: if immframe exits for any
+# reason (Immich outage at startup, a crash, `immframe` killed to pick up
+# a git pull) it comes back after 5 s instead of leaving the compositor's
+# bare background on the TV until the next reboot. Output goes to the
+# journal under tag 'immframe' — read live logs with:
+#     journalctl -t immframe -f
+(
+  while :; do
+    ~/immframe/.venv/bin/immframe 2>&1 | systemd-cat -t immframe
+    sleep 5
+  done
+) &

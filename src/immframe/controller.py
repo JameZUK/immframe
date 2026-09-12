@@ -70,7 +70,10 @@ _VIEWER_DEFAULTS: dict = {
     "display_y": 0,
     "display_w": None,
     "display_h": None,
-    "display_power": 0,
+    # 2 = wlr-randr: the only method that works on the KMS driver every
+    # current Pi OS ships (vcgencmd display_power is a silent no-op there).
+    # 1 = xset for X11 setups, 0 = vcgencmd for legacy firmware-driver Pis.
+    "display_power": 2,
     "display_hdmi": "HDMI-A-1",
     "use_glx": False,
     "use_sdl2": True,

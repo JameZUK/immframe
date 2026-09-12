@@ -149,9 +149,19 @@ mkdir -p ~/.config/labwc
 #  controllable via HA / HTTP)
 # swayidle -w timeout 600 'wlopm --off "*"' resume 'wlopm --on "*"' &
 
-# Start the slideshow
-~/immframe/.venv/bin/immframe &
+# Start the slideshow under a restart loop (comes back 5 s after any
+# exit instead of leaving a blank compositor until the next reboot).
+# Logs land in the journal: `journalctl -t immframe -f`
+(
+  while :; do
+    ~/immframe/.venv/bin/immframe 2>&1 | systemd-cat -t immframe
+    sleep 5
+  done
+) &
 ```
+
+Or just copy the maintained version: `cp examples/labwc/autostart ~/.config/labwc/autostart`
+(this is what `scripts/setup-display.sh` does).
 
 Make it executable:
 
