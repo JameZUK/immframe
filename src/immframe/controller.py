@@ -273,6 +273,8 @@ class Controller:
                     fit=self._config.video.fit,
                     rotate=self._config.video.rotate,
                     fullscreen=self._config.video.fullscreen,
+                    hwdec=self._config.video.hwdec,
+                    ensure_fullscreen=self._config.video.ensure_fullscreen,
                 )
             except Exception as e:
                 log.warning(
@@ -438,10 +440,29 @@ class Controller:
             log.warning("video play failed: %s", e)
             return
         deadline = time.time() + max(1.0, self._config.video.max_play_s)
+        paused_video = False
         while not end_evt.wait(timeout=0.5):
             if self._stop_evt.is_set():
                 self._video_player.stop()
                 return
+            # "Next" from the dashboard / HA / CLI: cut the clip short. The
+            # event stays set so the main loop advances immediately after.
+            if self._force_next_evt.is_set():
+                log.info("video skipped (next)")
+                self._video_player.stop()
+                return
+            # Mirror the slideshow pause onto the clip; the max_play_s
+            # deadline slides along while paused so a long pause doesn't
+            # expire it the instant playback resumes.
+            if self._paused != paused_video:
+                paused_video = self._paused
+                try:
+                    self._video_player.pause(paused_video)
+                except Exception as e:
+                    log.debug("video pause toggle failed: %s", e)
+            if paused_video:
+                deadline += 0.5
+                continue
             if time.time() > deadline:
                 log.warning("video exceeded max_play_s; stopping")
                 self._video_player.stop()

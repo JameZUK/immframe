@@ -159,6 +159,8 @@ selection:
 | `rotate` | enum | `auto` | Override MPV's video rotation: `auto` (honor container rotation tag — the default), `no` (disable rotation entirely), or `0`/`90`/`180`/`270` to force a clockwise rotation. Phone-shot portrait videos rotate correctly under `auto` because their container metadata carries the rotation. |
 | `fullscreen` | bool | `false` | Whether MPV requests its own fullscreen. **Leave `false` on the labwc kiosk** — the compositor is configured to fullscreen every window, and a *second* fullscreen request from MPV makes labwc's `ToggleFullscreen` rule toggle it back to a tiny default-size window (the "video plays in a small window" symptom). Set `true` only when running MPV under a compositor that does **not** auto-fullscreen windows (e.g. a regular desktop or X11 session). |
 | `max_play_s` | float | `60.0` | Hard cap per video in seconds. Slideshow advances even if MPV hasn't reported EOF (bad codec, network stall, etc.). |
+| `hwdec` | string | `auto-copy` | MPV `--hwdec`. `auto-copy` engages the Pi's hardware decoders (`v4l2m2m` for H.264, `rpivid`/`drm` for HEVC) and falls back to software elsewhere; mpv's own `auto-safe` skips the Pi decoders. `no` forces software decoding. |
+| `ensure_fullscreen` | bool | `true` | After a clip's first frame, re-request fullscreen if the MPV window mapped windowed (the "tiny video" symptom when the compositor's map-time rule doesn't stick). Set `false` on a desktop where you want MPV windowed. |
 
 ```yaml
 video:

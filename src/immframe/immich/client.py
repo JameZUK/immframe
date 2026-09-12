@@ -151,7 +151,7 @@ class ImmichClient:
         data = self._post("/search/random", json=body)
         if not isinstance(data, list):
             raise ImmichError(f"/search/random: expected list, got {type(data).__name__}")
-        return [_to_asset(d) for d in data]
+        return [_to_asset(d) for d in data if showable(d)]
 
     def search_smart(self, query: str, *, count: int = 20) -> list[Asset]:
         """POST /search/smart — returns SearchResponseDto with assets.items."""
@@ -160,6 +160,7 @@ class ImmichClient:
             "size": count,
             "withExif": True,
             "withPeople": True,
+            "visibility": "timeline",
         }
         data = self._post("/search/smart", json=body)
         return _items_from_search(data)
@@ -269,7 +270,7 @@ class ImmichClient:
         if not isinstance(data, dict):
             raise ImmichError(f"/albums/{album_id}: expected object")
         assets = data.get("assets", [])
-        return [_to_asset(d) for d in assets]
+        return [_to_asset(d) for d in assets if showable(d)]
 
     def explore(self) -> dict[str, list[str]]:
         """GET /search/explore — return `{field_name: [values]}`.
@@ -446,6 +447,12 @@ def _search_body(
         "size": count,
         "withExif": True,
         "withPeople": True,
+        # Timeline assets only. Without this Immich also returns *hidden*
+        # assets — chiefly the motion-clip companion of every live / motion
+        # photo (HEIC + MP4 pairs), which would otherwise be played as
+        # standalone 3-second videos on top of playing with their still.
+        # Also excludes archived and locked-folder assets.
+        "visibility": "timeline",
     }
     if taken_after is not None:
         body["takenAfter"] = taken_after.isoformat()
@@ -471,7 +478,25 @@ def _items_from_search(data: Any) -> list[Asset]:
         raise ImmichError("search response: expected object")
     assets_block = data.get("assets", {})
     items = assets_block.get("items", []) if isinstance(assets_block, dict) else []
-    return [_to_asset(d) for d in items]
+    return [_to_asset(d) for d in items if showable(d)]
+
+
+def showable(d: Any) -> bool:
+    """True for an AssetResponseDto dict the frame should display.
+
+    Belt-and-braces beside the `visibility` search filter: endpoints that
+    take no filter (albums, memories) and older Immich servers that ignore
+    it still get hidden / archived / trashed assets dropped here. Asset
+    dicts without a `visibility` field (pre-1.133 servers) pass through.
+    """
+    if not isinstance(d, dict):
+        return False
+    vis = d.get("visibility")
+    if isinstance(vis, str) and vis != "timeline":
+        return False
+    if d.get("isArchived") is True or d.get("isTrashed") is True:
+        return False
+    return True
 
 
 def _to_asset(d: dict[str, Any]) -> Asset:

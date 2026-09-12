@@ -24,7 +24,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 from datetime import datetime, timedelta, timezone
 
-from .client import ImmichClient, ImmichError, _to_asset
+from .client import ImmichClient, ImmichError, _to_asset, showable
 from .models import Asset
 
 log = logging.getLogger(__name__)
@@ -291,7 +291,7 @@ class MemorySelector:
 
         mem = random.choice(self._memories)
         asset_dicts = mem.get("assets") or []
-        pool = [_to_asset(a) for a in asset_dicts if isinstance(a, dict)]
+        pool = [_to_asset(a) for a in asset_dicts if showable(a)]
         random.shuffle(pool)
         self._pool = pool
 

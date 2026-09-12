@@ -258,6 +258,35 @@ def test_post_smart_query():
         assert ctrl.smart_query == "sunsets at the beach"
 
 
+def test_post_rejects_form_content_types():
+    """CSRF guard: an HTML form can only POST these types without a CORS
+    preflight, and cached Basic creds would ride along."""
+    with _server() as (base, ctrl, _):
+        for ctype, body in (
+            ("application/x-www-form-urlencoded", "value=true"),
+            ("text/plain", '{"value": true}'),
+            ("multipart/form-data; boundary=x", "--x--"),
+        ):
+            r = requests.post(
+                f"{base}/api/paused", data=body, timeout=2.0, auth=_auth(),
+                headers={"Content-Type": ctype},
+            )
+            assert r.status_code == 415, ctype
+        assert ctrl.paused is False
+        # JSON and body-less POSTs are unaffected.
+        r = requests.post(f"{base}/api/paused", json={"value": True}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and ctrl.paused is True
+        r = requests.post(f"{base}/api/next", timeout=2.0, auth=_auth())
+        assert r.status_code == 202
+
+
+def test_post_ignores_query_string():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/next?x=1", timeout=2.0, auth=_auth())
+        assert r.status_code == 202
+        assert ctrl.next_calls == 1
+
+
 def test_post_next_advances():
     with _server() as (base, ctrl, _):
         r = requests.post(f"{base}/api/next", timeout=2.0, auth=_auth())
@@ -612,7 +641,7 @@ def test_post_rejects_non_json():
         r = requests.post(
             f"{base}/api/paused",
             data="not json",
-            headers={"Content-Type": "text/plain", "Content-Length": "8"},
+            headers={"Content-Type": "application/json", "Content-Length": "8"},
             timeout=2.0, auth=_auth(),
         )
         assert r.status_code == 400

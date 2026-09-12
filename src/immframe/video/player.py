@@ -35,6 +35,8 @@ class VideoPlayer:
         vo: VideoOutput | str = "gpu",
         rotate: str = "auto",
         fullscreen: bool = False,
+        hwdec: str = "auto-copy",
+        ensure_fullscreen: bool = True,
     ) -> None:
         # Imported lazily so the module imports cleanly on dev hosts without libmpv.
         import mpv
@@ -43,6 +45,7 @@ class VideoPlayer:
         self._playing = threading.Event()
         self._on_end: Callable[[], None] | None = None
         self._on_first_frame: Callable[[], None] | None = None
+        self._ensure_fullscreen = ensure_fullscreen
 
         # python-mpv constructor kwargs map underscore→dash, so `video_rotate`
         # below becomes MPV's --video-rotate option. "auto" is MPV's own
@@ -81,8 +84,14 @@ class VideoPlayer:
         # silently disable video for the entire session. We set it *after*
         # construction instead (see below), where an unsupported option is a
         # logged no-op rather than fatal.
+        # `hwdec`: on a Pi 4 (Bookworm, libmpv 0.35) the only hardware path
+        # for phone H.264 is v4l2m2m-copy, which mpv's "auto-safe" whitelist
+        # skips — leaving 1080p+ clips to software decode (A/V desync, "too
+        # many packets in the demuxer", clips hitting max_play_s). "auto-copy"
+        # tries every copy-back decoder and falls back to software cleanly.
         mpv_opts: dict = dict(
             vo=vo,
+            hwdec=hwdec,
             mute=mute,
             keep_open="no",
             video_unscaled="no",
@@ -135,6 +144,7 @@ class VideoPlayer:
         def _on_time(_name, value):                     # noqa: ANN001
             if value is not None and value > 0 and not self._playing.is_set():
                 self._playing.set()
+                self._check_window()
                 cb = self._on_first_frame
                 if cb is not None:
                     self._on_first_frame = None
@@ -142,6 +152,37 @@ class VideoPlayer:
                         cb()
                     except Exception as e:
                         log.exception("on_first_frame callback raised: %s", e)
+
+    def _check_window(self) -> None:
+        """Once a frame is up, verify the window actually went fullscreen.
+
+        On the labwc kiosk the compositor is expected to fullscreen the mpv
+        window when it maps (examples/labwc/rc.xml). That rule fires once, on
+        map, and has proved racy in the field: some clips end up playing in
+        a native-resolution window ("tiny video"). By the time the first
+        frame is rendered the map-time rule has fired, so requesting
+        fullscreen here can no longer double-toggle with it — it's a no-op
+        when the rule worked and the fix when it didn't. Logged either way so
+        the journal shows the window geometry per clip."""
+        try:
+            fs = bool(self._mpv.fullscreen)
+            dims = self._mpv.osd_dimensions or {}
+            w, h = dims.get("w"), dims.get("h")
+            hw = self._mpv.hwdec_current
+        except Exception as e:
+            log.debug("mpv window introspection failed: %s", e)
+            return
+        if fs or not self._ensure_fullscreen:
+            log.info("mpv window %sx%s fullscreen=%s hwdec=%s", w, h, fs, hw)
+            return
+        log.warning(
+            "mpv window is %sx%s and NOT fullscreen after map — requesting "
+            "fullscreen (hwdec=%s)", w, h, hw,
+        )
+        try:
+            self._mpv["fullscreen"] = True
+        except Exception as e:
+            log.warning("mpv fullscreen request failed: %s", e)
 
     # ── Diagnostics ─────────────────────────────────────────────────────
     @staticmethod

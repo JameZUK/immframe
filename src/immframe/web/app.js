@@ -35,7 +35,12 @@ async function postValue(endpoint, value) {
 }
 
 async function postCommand(endpoint) {
-  const r = await fetch(endpoint, { method: "POST" });
+  // Content-Type marks this as a scripted request; the server rejects
+  // form-encoded POSTs (CSRF guard) and this keeps us on the right side.
+  const r = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
   if (!r.ok) throw new Error(`POST ${endpoint} -> ${r.status}`);
 }
 

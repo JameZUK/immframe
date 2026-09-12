@@ -81,6 +81,11 @@ _STATIC: dict[str, tuple[str, str]] = {
     "/static/app.js": ("app.js", "application/javascript; charset=utf-8"),
 }
 
+# Content types an HTML form can submit cross-origin without a preflight.
+_FORM_CONTENT_TYPES = frozenset({
+    "application/x-www-form-urlencoded", "multipart/form-data", "text/plain",
+})
+
 _POST_PATHS = frozenset({
     "/api/paused",
     "/api/selection_mode",
@@ -310,7 +315,16 @@ class _Handler(BaseHTTPRequestHandler):
     def _dispatch_post(self) -> None:
         if not self._authed():
             return self._unauthorized()
-        path = self.path
+        # CSRF guard. Browsers cache Basic credentials, so a page on any
+        # origin could otherwise drive the frame with a plain <form POST>
+        # (a text/plain form body can be shaped into valid JSON). Forms can
+        # only send these three content types without a CORS preflight —
+        # and we answer no preflight — so rejecting them closes the hole
+        # without affecting the SPA, the CLI, HA or curl (JSON / no body).
+        ctype = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if ctype in _FORM_CONTENT_TYPES:
+            raise _HttpError(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "send JSON, not a form")
+        path = self.path.split("?", 1)[0]
         if path == "/api/paused":
             value = self._require_value(bool)
             self._ctrl.paused = value

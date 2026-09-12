@@ -36,6 +36,8 @@ video:
   rotate: auto                             # auto | no | 0 | 90 | 180 | 270 (override container rotation)
   fullscreen: false                        # let the compositor fullscreen MPV (true only on non-kiosk desktops)
   max_play_s: 60.0                         # hard cap per video play (sec)
+  hwdec: auto-copy                         # MPV --hwdec; auto-copy uses the Pi's HW decoders, "no" = software
+  ensure_fullscreen: true                  # re-request fullscreen if a clip maps windowed ("tiny video")
 
 collage:
   # Tile several photos into one frame. Works on top of ANY selection mode.

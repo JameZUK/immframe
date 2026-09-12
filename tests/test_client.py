@@ -118,6 +118,66 @@ def test_random_assets_normalises():
 
 
 @responses.activate
+def test_random_assets_requests_timeline_visibility_and_drops_hidden():
+    """Immich returns the hidden motion-clip companion of every live photo
+    from search unless `visibility` is filtered — and older servers ignore
+    the filter, so hidden/archived/trashed are also dropped client-side."""
+    captured = {}
+
+    def cb(request):
+        import json
+        captured["body"] = json.loads(request.body)
+        shown = _asset_json("a")
+        shown["visibility"] = "timeline"
+        hidden = _asset_json("b", "VIDEO")
+        hidden["visibility"] = "hidden"
+        archived = _asset_json("c")
+        archived["visibility"] = "archive"
+        trashed = _asset_json("d")
+        trashed["isTrashed"] = True
+        legacy = _asset_json("e")              # pre-1.133: no visibility field
+        legacy.pop("visibility", None)
+        return (200, {}, json.dumps([shown, hidden, archived, trashed, legacy]))
+
+    responses.add_callback(responses.POST, f"{BASE}/api/search/random", callback=cb, content_type="application/json")
+    c = ImmichClient(BASE, "k")
+    out = c.random_assets(5)
+    assert captured["body"]["visibility"] == "timeline"
+    assert [a.id for a in out] == ["a", "e"]
+
+
+@responses.activate
+def test_search_metadata_and_smart_request_timeline_visibility():
+    import json
+    bodies = {}
+
+    def cb_meta(request):
+        bodies["metadata"] = json.loads(request.body)
+        return (200, {}, json.dumps({"assets": {"items": [], "total": 0, "count": 0}}))
+
+    def cb_smart(request):
+        bodies["smart"] = json.loads(request.body)
+        return (200, {}, json.dumps({"assets": {"items": [], "total": 0, "count": 0}}))
+
+    responses.add_callback(responses.POST, f"{BASE}/api/search/metadata", callback=cb_meta, content_type="application/json")
+    responses.add_callback(responses.POST, f"{BASE}/api/search/smart", callback=cb_smart, content_type="application/json")
+    c = ImmichClient(BASE, "k")
+    c.search_metadata(city="York", count=3)
+    c.search_smart("beach", count=3)
+    assert bodies["metadata"]["visibility"] == "timeline"
+    assert bodies["smart"]["visibility"] == "timeline"
+
+
+@responses.activate
+def test_album_assets_drops_hidden():
+    hidden = _asset_json("h", "VIDEO")
+    hidden["visibility"] = "hidden"
+    responses.add(responses.GET, f"{BASE}/api/albums/alb1", json={"assets": [_asset_json("a"), hidden]})
+    c = ImmichClient(BASE, "k")
+    assert [a.id for a in c.album_assets("alb1")] == ["a"]
+
+
+@responses.activate
 def test_random_assets_omits_videos_when_asked():
     captured = {}
 

@@ -132,6 +132,15 @@ class VideoConfig:
     # Hard cap for any single video play (seconds) — slideshow advances
     # even if MPV hasn't reported EOF (bad codec, network stall, ...)
     max_play_s: float = 60.0
+    # MPV --hwdec. "auto-copy" engages the Pi's v4l2m2m / rpivid decoders
+    # (mpv's "auto-safe" skips them) and degrades to software elsewhere.
+    # "no" forces software decoding.
+    hwdec: str = "auto-copy"
+    # After a clip's first frame, if the MPV window is not fullscreen,
+    # request it. Works around the compositor's map-time fullscreen rule
+    # occasionally not sticking ("tiny video"). Set false on a desktop where
+    # you want MPV windowed.
+    ensure_fullscreen: bool = True
 
 
 @dataclass
@@ -302,6 +311,8 @@ class Config:
             rotate=rotate_raw,
             fullscreen=bool(vid_raw.get("fullscreen", False)),
             max_play_s=float(vid_raw.get("max_play_s", 60.0)),
+            hwdec=str(vid_raw.get("hwdec", "auto-copy")).strip() or "auto-copy",
+            ensure_fullscreen=bool(vid_raw.get("ensure_fullscreen", True)),
         )
         # rotate validation
         valid_rot = ("auto", "no", "0", "90", "180", "270")
