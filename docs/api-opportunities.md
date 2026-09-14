@@ -157,6 +157,13 @@ command so HA users can find their album IDs without curl.
 - **Code:** ~10 lines for the `immframe list-albums` CLI; already
   available — just hasn't been added.
 
+## Parked ideas (written up separately)
+
+- [ML orientation detection](./ideas/ml-orientation.md) 🟠 — detect and
+  correct sideways photos/videos whose metadata is missing or wrong; a
+  self-trained 4-class CNN in the prefetch pipeline, suggestion queue in
+  the dashboard, Immich rotate edits on approval.
+
 ## Things we should **not** do
 
 - `original` file fetch. Immich blocks it at the thumbnail endpoint
