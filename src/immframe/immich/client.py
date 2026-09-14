@@ -526,6 +526,54 @@ class ImmichClient:
             raise ImmichError(f"PUT /assets/{asset_id}: expected object")
         return data
 
+    def get_edits(self, asset_id: str) -> list[dict[str, Any]]:
+        """GET /assets/{id}/edits — the asset's non-destructive edit stack
+        (crop / rotate / mirror), in application order. Needs asset.edit.get."""
+        data = self._request(
+            "GET", f"/assets/{asset_id}/edits",
+            headers={self.AUTH_HEADER: self._write_api_key},
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("edits"), list):
+            raise ImmichError(f"GET /assets/{asset_id}/edits: expected {{edits: [...]}}")
+        return [e for e in data["edits"] if isinstance(e, dict)]
+
+    def set_edits(self, asset_id: str, edits: list[dict[str, Any]]) -> None:
+        """PUT /assets/{id}/edits — replace the edit stack (empty list =
+        DELETE, i.e. back to the original). Needs asset.edit.create /
+        asset.edit.delete."""
+        hdr = {self.AUTH_HEADER: self._write_api_key}
+        if not edits:
+            self._request("DELETE", f"/assets/{asset_id}/edits", headers=hdr)
+            return
+        body = {"edits": [{"action": e["action"], "parameters": e["parameters"]} for e in edits]}
+        self._request("PUT", f"/assets/{asset_id}/edits", json=body, headers=hdr)
+
+    def rotate_asset(self, asset_id: str, delta: int = 90) -> int:
+        """Rotate an image a further `delta` degrees clockwise via Immich's
+        editor. Folds the angle into the stack's existing rotate step (or
+        appends one) so repeated presses accumulate: 90 → 180 → 270 → 0.
+        Returns the resulting total angle. Immich regenerates the preview
+        afterwards; the original file is untouched."""
+        if delta % 90 or not 0 < delta < 360:
+            raise ValueError("delta must be 90, 180 or 270")
+        edits = self.get_edits(asset_id)
+        total = delta
+        out: list[dict[str, Any]] = []
+        placed = False
+        for e in edits:
+            if e.get("action") == "rotate" and not placed:
+                current = int((e.get("parameters") or {}).get("angle", 0))
+                total = (current + delta) % 360
+                if total:
+                    out.append({"action": "rotate", "parameters": {"angle": total}})
+                placed = True
+            else:
+                out.append({"action": e.get("action"), "parameters": e.get("parameters") or {}})
+        if not placed:
+            out.append({"action": "rotate", "parameters": {"angle": total}})
+        self.set_edits(asset_id, out)
+        return total
+
     def video_play_args(self, asset_id: str) -> tuple[str, dict[str, str]]:
         """Returns `(url, headers)` for MPV's `loadfile` + `http-header-fields`."""
         return self._url(f"/assets/{asset_id}/video/playback"), {self.AUTH_HEADER: self._api_key}

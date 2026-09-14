@@ -150,6 +150,16 @@ def _probe_write(client: ImmichClient, rep: Report) -> None:
                      "(hide still works locally; favourite / archive-in-Immich won't)")
         else:
             rep.ok("asset.update (dashboard favourite / hide)", "permission present")
+    try:
+        client.get_edits(NIL_UUID)
+        rep.ok("asset.edit.get (dashboard rotate)")
+    except ImmichError as e:
+        msg = str(e)
+        if "permission" in msg.lower() or " 403" in msg:
+            rep.warn("asset.edit.* (dashboard rotate)", "key lacks permission",
+                     "add asset.edit.get + asset.edit.create (+ asset.edit.delete) to the write key")
+        else:
+            rep.ok("asset.edit.get (dashboard rotate)", "permission present")
 
 
 def _check_system_config(client: ImmichClient, rep: Report) -> None:

@@ -57,7 +57,7 @@ UX picframe got right.
   ready-made Lovelace card
 - Built-in web dashboard at `http://<pi-ip>:8080/` — phone-friendly remote
   for pause / next / mode / brightness / overlay fields / clock, plus
-  **♥ Favourite** and **Never show again** for the photo on screen
+  **♥ Favourite**, **↻ Rotate** and **Never show again** for the photo on screen
   (curate the frame from the sofa — hides instantly, stars/archives in
   Immich when the key can write)
 - **Settings page** (`/config`) edits `config.yaml` from the phone: a

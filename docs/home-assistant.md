@@ -19,6 +19,7 @@ HA, and a complete Lovelace card example.
 | `button.immframe_next` | button | Force-advance to the next slide |
 | `button.immframe_favorite` | button | Star / unstar the photo on screen in Immich (needs a key with `asset.update` — see `immich.write_api_key`) |
 | `button.immframe_hide` | button | Never show the photo on screen again: added to the frame's local hidden list instantly and archived in Immich when the key allows; the slideshow moves on |
+| `button.immframe_rotate` | button | Rotate the photo on screen 90° clockwise in Immich's non-destructive editor (needs `asset.edit.get` + `asset.edit.create`); the frame re-shows it once Immich has regenerated the preview |
 | `switch.immframe_display_is_on` | switch | Turn the HDMI output on/off |
 | `number.immframe_brightness` | number (0.0–1.0) | Render brightness |
 | `number.immframe_time_delay` | number (1–3600 s) | Slide duration |
@@ -134,6 +135,11 @@ cards:
         entity: button.immframe_hide
         name: Never again
         icon: mdi:eye-off
+        tap_action: { action: press }
+      - type: button
+        entity: button.immframe_rotate
+        name: Rotate
+        icon: mdi:rotate-right
         tap_action: { action: press }
 
   - type: entities

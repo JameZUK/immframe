@@ -45,7 +45,7 @@ SCHEMA: list[dict[str, Any]] = [
         {"path": "immich.url", "label": "Server URL", "type": "str", "help": "No trailing slash; /api is appended."},
         {"path": "immich.api_key", "label": "API key", "type": "secret", "help": "Read scope is enough for the slideshow."},
         {"path": "immich.write_api_key", "label": "Write API key", "type": "secret",
-         "help": "Optional key with asset.update for ♥ Favourite / Never show again. Empty = use the API key."},
+         "help": "Optional key for ♥ / Never show again / Rotate: asset.update + asset.edit.get/create/delete. Empty = use the API key."},
         {"path": "immich.image_size", "label": "Image size", "type": "enum", "options": ["fullsize", "preview"],
          "help": "fullsize for 4K displays (needs Immich full-size previews for HEIC/RAW)."},
         {"path": "immich.timeout_s", "label": "Request timeout (s)", "type": "float"},

@@ -214,6 +214,8 @@ class Controller:
         # selection changes so a stale slide from the old mode never shows.
         self._pending_item = None
         self._drop_pending = False
+        # Re-show request (rotated preview) — served before anything else.
+        self._priority_item = None
         # Local file backing the current slide (the prefetched preview, or a
         # composited collage). Served by the HTTP /api/current_image endpoint —
         # collages aren't real Immich assets so the image proxy can't fetch them.
@@ -467,15 +469,19 @@ class Controller:
         for old in current_paths:
             old.unlink(missing_ok=True)
         self._current_path = None
-        pending = self._pending_item
-        self._pending_item = None
-        if pending is not None and pending[0] is not None:
-            pending[0].unlink(missing_ok=True)
+        for leftover in (self._pending_item, self._priority_item):
+            if leftover is not None and leftover[0] is not None:
+                leftover[0].unlink(missing_ok=True)
+        self._pending_item = self._priority_item = None
 
     # ── Queue access + portrait pairing ─────────────────────────────────
     def _take_item(self, *, timeout: float):
         """Next slide: the held-back lookahead item if there is one (unless
         the selection changed since it was fetched), else the queue."""
+        priority = self._priority_item
+        self._priority_item = None
+        if priority is not None:
+            return priority
         pending = self._pending_item
         self._pending_item = None
         if pending is not None:
@@ -705,6 +711,61 @@ class Controller:
     @property
     def hidden_count(self) -> int:
         return len(self._hidden)
+
+    def rotate_current(self, delta: int = 90) -> dict:
+        """Rotate the photo on screen `delta`° clockwise through Immich's
+        non-destructive editor (the original is untouched; Immich rewrites
+        the preview). Once the regenerated preview arrives the slide is
+        re-shown in place. Returns {"id", "angle"} (cumulative angle).
+        Raises ValueError for no asset / a video / a collage; ImmichError
+        when Immich refuses (the write key needs asset.edit.get/create)."""
+        asset = self._current_asset
+        if asset is None:
+            raise ValueError("no current asset")
+        if is_collage_id(asset.id):
+            raise ValueError("a collage is not an Immich asset")
+        if asset.kind != AssetKind.IMAGE:
+            raise ValueError("only photos can be rotated (video rotation lives in the file)")
+        angle = self._client.rotate_asset(asset.id, delta)
+        log.info("rotated in Immich: %s -> %d°", asset.id, angle)
+        threading.Thread(
+            target=self._reshow_after_edit, args=(asset, self._current_path),
+            name="reshow", daemon=True,
+        ).start()
+        return {"id": asset.id, "angle": angle}
+
+    def _reshow_after_edit(self, asset: Asset, old_path: Path | None, *,
+                           attempts: int = 8, interval_s: float = 1.5) -> None:
+        """Poll for the regenerated preview (Immich rewrites it in a job a
+        moment after the edit); when it differs from what's on screen, put
+        it at the head of the line and advance. Gives up quietly if the
+        slide has already moved on."""
+        old_bytes = None
+        try:
+            if old_path is not None:
+                old_bytes = old_path.read_bytes()
+        except OSError:
+            pass
+        for _ in range(attempts):
+            self._stop_evt.wait(interval_s)
+            if self._stop_evt.is_set():
+                return
+            if self._current_asset is None or self._current_asset.id != asset.id:
+                return                                  # moved on; the next fetch is fresh anyway
+            item = self._prefetch.fetch_now(asset)
+            if item is None or item[0] is None:
+                continue
+            try:
+                same = old_bytes is not None and item[0].read_bytes() == old_bytes
+            except OSError:
+                same = False
+            if same:
+                item[0].unlink(missing_ok=True)
+                continue                                # not regenerated yet
+            self._priority_item = item
+            self._force_next_evt.set()
+            return
+        log.info("preview for %s not regenerated yet — it will show rotated next time", asset.id)
 
     @property
     def paused(self) -> bool:

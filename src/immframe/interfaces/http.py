@@ -24,6 +24,7 @@ Endpoints:
     POST /api/next                   force-advance
     POST /api/hide                   never show the current asset again (+ archive in Immich)
     POST /api/favorite               {"value": bool} or empty body = toggle current asset's ♥
+    POST /api/rotate                 {"angle": 90|180|270} (default 90) — rotate the photo on screen in Immich
     POST /api/collage_enabled        {"value": bool}
     POST /api/collage_layout         {"value": "auto"|"grid"|"golden_ratio"}
     POST /api/collage_min_tiles      {"value": int 2..12}
@@ -103,6 +104,7 @@ _POST_PATHS = frozenset({
     "/api/next",
     "/api/hide",
     "/api/favorite",
+    "/api/rotate",
     "/api/config",
     "/api/restart",
     "/api/brightness",
@@ -378,6 +380,24 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/restart":
             self._schedule_restart()
             return self._json(HTTPStatus.ACCEPTED, {"restarting": True})
+        if path == "/api/rotate":
+            body = self._read_json()
+            delta = 90
+            if isinstance(body, dict) and "angle" in body:
+                if body["angle"] not in (90, 180, 270):
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, "angle must be 90, 180 or 270")
+                delta = int(body["angle"])
+            try:
+                result = self._ctrl.rotate_current(delta)
+            except ValueError as e:
+                raise _HttpError(HTTPStatus.CONFLICT, str(e))
+            except ImmichError as e:
+                raise _HttpError(
+                    HTTPStatus.BAD_GATEWAY,
+                    f"Immich refused the edit ({e}) — the write key needs asset.edit.get + "
+                    "asset.edit.create; set immich.write_api_key",
+                )
+            return self._json(HTTPStatus.OK, result)
         if path == "/api/hide":
             try:
                 result = self._ctrl.hide_current()

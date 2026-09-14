@@ -163,6 +163,12 @@ class PrefetchWorker:
             self._gen += 1
         self._drain_queue()
 
+    def fetch_now(self, asset: Asset) -> QueueItem | None:
+        """Download one asset into the cache immediately, on the caller's
+        thread, without touching the queue. The controller uses this to
+        re-show a photo after an edit; the caller owns the returned path."""
+        return self._fetch(asset)
+
     # ── Internals ───────────────────────────────────────────────────────
     def _drain_queue(self) -> None:
         while True:

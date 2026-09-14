@@ -67,6 +67,15 @@ class _StubController:
         self.next_calls += 1
         return self.hide_result
 
+    rotate_result: dict | Exception = {"id": "x", "angle": 90}
+    rotate_calls: list = []
+
+    def rotate_current(self, delta=90):
+        self.rotate_calls.append(delta)
+        if isinstance(self.rotate_result, Exception):
+            raise self.rotate_result
+        return self.rotate_result
+
     def favorite_current(self, value=None):
         self.favorite_calls.append(value)
         if isinstance(self.favorite_result, Exception):
@@ -969,3 +978,26 @@ def test_config_defaults_to_user_path_when_daemon_has_none(monkeypatch, tmp_path
         ctrl.config = None
         body = requests.get(f"{base}/api/config", timeout=2.0, auth=_auth()).json()
         assert body["exists"] is False and body["path"].endswith("new.yaml")
+
+
+
+def test_post_rotate_default_and_explicit_angle():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/rotate", timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and r.json() == {"id": "x", "angle": 90}
+        r = requests.post(f"{base}/api/rotate", json={"angle": 180}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200
+        assert ctrl.rotate_calls == [90, 180]
+        r = requests.post(f"{base}/api/rotate", json={"angle": 45}, timeout=2.0, auth=_auth())
+        assert r.status_code == 400
+
+
+def test_post_rotate_errors():
+    from immframe.immich.client import ImmichError
+    with _server() as (base, ctrl, _):
+        ctrl.rotate_result = ValueError("only photos can be rotated")
+        assert requests.post(f"{base}/api/rotate", timeout=2.0, auth=_auth()).status_code == 409
+        ctrl.rotate_result = ImmichError("403 Missing required permission: asset.edit.create")
+        r = requests.post(f"{base}/api/rotate", timeout=2.0, auth=_auth())
+        assert r.status_code == 502 and "asset.edit" in r.json()["error"]
+        assert requests.post(f"{base}/api/rotate", timeout=2.0).status_code == 401

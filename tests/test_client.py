@@ -695,3 +695,82 @@ def test_search_metadata_passes_filters():
     assert body["personIds"] == ["pa", "pb"]
     assert body["size"] == 10
     assert "takenAfter" in body
+
+
+
+# ── Editor: rotate ────────────────────────────────────────────────────────
+
+
+def _edits_server(existing):
+    """Register GET/PUT/DELETE /assets/x/edits; returns the captured writes."""
+    import json
+    writes = {}
+    responses.add(responses.GET, f"{BASE}/api/assets/x/edits", json={"assetId": "x", "edits": existing})
+
+    def put(request):
+        writes["put"] = json.loads(request.body); writes["key"] = request.headers.get("x-api-key")
+        return (200, {}, "{}")
+
+    def delete(request):
+        writes["delete"] = True; writes["key"] = request.headers.get("x-api-key")
+        return (204, {}, "")
+
+    responses.add_callback(responses.PUT, f"{BASE}/api/assets/x/edits", callback=put, content_type="application/json")
+    responses.add_callback(responses.DELETE, f"{BASE}/api/assets/x/edits", callback=delete)
+    return writes
+
+
+@responses.activate
+def test_rotate_appends_when_no_rotate_step_and_uses_write_key():
+    writes = _edits_server([{"id": "e1", "action": "crop", "parameters": {"x": 0, "y": 0, "width": 10, "height": 10}}])
+    c = ImmichClient(BASE, "read-key", write_api_key="write-key")
+    assert c.rotate_asset("x", 90) == 90
+    assert writes["key"] == "write-key"
+    assert writes["put"] == {"edits": [
+        {"action": "crop", "parameters": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        {"action": "rotate", "parameters": {"angle": 90}},
+    ]}
+
+
+@responses.activate
+def test_rotate_folds_into_existing_step_in_place():
+    writes = _edits_server([
+        {"id": "e1", "action": "rotate", "parameters": {"angle": 180}},
+        {"id": "e2", "action": "mirror", "parameters": {"axis": "horizontal"}},
+    ])
+    c = ImmichClient(BASE, "k")
+    assert c.rotate_asset("x", 90) == 270
+    assert writes["put"]["edits"] == [
+        {"action": "rotate", "parameters": {"angle": 270}},
+        {"action": "mirror", "parameters": {"axis": "horizontal"}},
+    ]
+
+
+@responses.activate
+def test_rotate_back_to_zero_drops_step_or_deletes_stack():
+    writes = _edits_server([{"id": "e1", "action": "rotate", "parameters": {"angle": 270}}])
+    c = ImmichClient(BASE, "k")
+    assert c.rotate_asset("x", 90) == 0
+    assert writes.get("delete") is True and "put" not in writes
+    responses.reset()
+    writes = _edits_server([
+        {"id": "e1", "action": "rotate", "parameters": {"angle": 270}},
+        {"id": "e2", "action": "mirror", "parameters": {"axis": "vertical"}},
+    ])
+    assert c.rotate_asset("x", 90) == 0
+    assert writes["put"]["edits"] == [{"action": "mirror", "parameters": {"axis": "vertical"}}]
+
+
+def test_rotate_rejects_bad_delta():
+    c = ImmichClient(BASE, "k")
+    with pytest.raises(ValueError):
+        c.rotate_asset("x", 45)
+
+
+@responses.activate
+def test_rotate_permission_error_surfaces():
+    responses.add(responses.GET, f"{BASE}/api/assets/x/edits", status=403,
+                  json={"message": "Missing required permission: asset.edit.get"})
+    c = ImmichClient(BASE, "k")
+    with pytest.raises(ImmichError, match="asset.edit.get"):
+        c.rotate_asset("x")

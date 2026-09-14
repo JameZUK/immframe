@@ -73,6 +73,7 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("button", "next", "Next", icon="mdi:skip-next", has_state=False),
     Entity("button", "favorite", "Favourite", icon="mdi:heart", has_state=False),
     Entity("button", "hide", "Never show again", icon="mdi:eye-off", has_state=False),
+    Entity("button", "rotate", "Rotate 90°", icon="mdi:rotate-right", has_state=False),
 
     # Display
     Entity("switch", "display_is_on", "Display", icon="mdi:monitor"),
@@ -199,6 +200,8 @@ def _apply_cmd(controller: "Controller", entity: Entity, payload: str) -> None:
         controller.favorite_current()
     elif oid == "hide":
         controller.hide_current()
+    elif oid == "rotate":
+        controller.rotate_current()
     elif oid == "display_is_on":
         controller.display_is_on = (s.upper() == entity.payload_on)
     elif oid == "brightness":

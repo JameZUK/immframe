@@ -144,6 +144,7 @@ function render(state) {
       // Curation buttons: collages are synthetic (nothing to star/hide).
       $("btn-favorite").disabled = !!a.is_collage;
       $("btn-hide").disabled = !!a.is_collage;
+      $("btn-rotate").disabled = !!a.is_collage || a.kind !== "IMAGE";
       $("btn-favorite").dataset.active = String(!!a.favorite);
       $("btn-favorite").textContent = a.favorite ? "♥ Favourited" : "♡ Favourite";
       $("meta-file").textContent = a.file || "—";
@@ -156,6 +157,7 @@ function render(state) {
     } else {
       $("btn-favorite").disabled = true;
       $("btn-hide").disabled = true;
+      $("btn-rotate").disabled = true;
       $("current-image").style.display = "none";
       $("image-placeholder").style.display = "flex";
       ["meta-file", "meta-date", "meta-where", "meta-camera", "meta-kind", "meta-pair"].forEach(id => {
@@ -223,6 +225,15 @@ function wire() {
       if (next) render(next);
       curateMsg("ok", next && next.current_asset && next.current_asset.favorite
         ? "Starred in Immich" : "Un-starred in Immich");
+    } catch (e) {
+      curateMsg("err", String(e.message || e));
+    }
+  });
+
+  $("btn-rotate").addEventListener("click", async () => {
+    try {
+      const r = await postValueRaw("/api/rotate", { angle: 90 });
+      curateMsg("ok", `Rotated to ${r.angle}° in Immich — the frame re-shows it once the preview is regenerated`);
     } catch (e) {
       curateMsg("err", String(e.message || e));
     }

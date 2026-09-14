@@ -550,3 +550,61 @@ def test_pending_item_dropped_after_selection_change(tmp_path):
 def test_portrait_pairs_config_toggle():
     assert _controller()._portrait_pairs is True
     assert _controller(portrait_pairs=False)._portrait_pairs is False
+
+
+
+# ── Rotate + re-show ─────────────────────────────────────────────────────
+
+
+def test_rotate_current_calls_immich_and_reshows_when_preview_changes(tmp_path):
+    from immframe.immich.models import AssetKind
+    c = _controller()
+    old = tmp_path / "old.jpg"; old.write_bytes(b"OLD")
+    c._current_asset = _asset(); c._current_path = old
+    c._client.rotate_asset.return_value = 90
+    new = tmp_path / "new.jpg"; new.write_bytes(b"NEW")
+    c._prefetch.fetch_now.return_value = (new, c._current_asset, None)
+    out = c.rotate_current(90)
+    assert out == {"id": c._current_asset.id, "angle": 90}
+    c._client.rotate_asset.assert_called_once_with(c._current_asset.id, 90)
+    # The re-show thread polls; drive it synchronously with tiny timing.
+    c._reshow_after_edit(c._current_asset, old, attempts=3, interval_s=0.01)
+    assert c._priority_item[0] == new
+    assert c._force_next_evt.is_set()
+    assert c._take_item(timeout=0.1)[0] == new                 # served before the queue
+    c._prefetch.next.assert_not_called()
+
+
+def test_reshow_waits_while_preview_unchanged_then_gives_up(tmp_path):
+    c = _controller()
+    old = tmp_path / "old.jpg"; old.write_bytes(b"SAME")
+    c._current_asset = _asset(); c._current_path = old
+    same = tmp_path / "same.jpg"
+    def fetch(asset):
+        same.write_bytes(b"SAME"); return (same, asset, None)
+    c._prefetch.fetch_now.side_effect = fetch
+    c._reshow_after_edit(c._current_asset, old, attempts=3, interval_s=0.01)
+    assert c._priority_item is None and not c._force_next_evt.is_set()
+    assert c._prefetch.fetch_now.call_count == 3
+    assert not same.exists()                                     # unchanged copies cleaned up
+
+
+def test_reshow_stops_when_slide_moved_on(tmp_path):
+    c = _controller()
+    c._current_asset = _asset("other-asset-id-0000000000000000000")
+    c._reshow_after_edit(_asset(), None, attempts=3, interval_s=0.01)
+    c._prefetch.fetch_now.assert_not_called()
+
+
+def test_rotate_current_rejects_video_collage_and_nothing():
+    from immframe.immich.models import AssetKind
+    c = _controller()
+    with pytest.raises(ValueError):
+        c.rotate_current()
+    c._current_asset = _asset("collage-9")
+    with pytest.raises(ValueError):
+        c.rotate_current()
+    c._current_asset = _item("vid", kind=AssetKind.VIDEO)[1]
+    with pytest.raises(ValueError, match="video"):
+        c.rotate_current()
+    c._client.rotate_asset.assert_not_called()

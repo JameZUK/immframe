@@ -30,7 +30,7 @@ Top-level sections:
 |---|---|---|---|
 | `url` | string | `https://immich.local` | Base URL of your Immich server. No trailing slash. immframe appends `/api`. |
 | `api_key` | string | `""` (required) | Immich API key. Create in *Immich → Account Settings → API Keys → New API Key*. `${ENV}` expansion supported. |
-| `write_api_key` | string | `""` | Optional second key used only for the dashboard's *Favourite* / *Never show again* actions (`PUT /assets/{id}` — needs the `asset.update` permission). Lets the everyday `api_key` stay read-only. Empty = use `api_key` for those too. |
+| `write_api_key` | string | `""` | Optional second key used only for the dashboard's *Favourite* / *Never show again* / *Rotate* actions. Permissions it needs: `asset.update` (favourite, archive), `asset.edit.get` + `asset.edit.create` (rotate) and `asset.edit.delete` (rotating back to 0°). Lets the everyday `api_key` stay read-only. Empty = use `api_key` for those too. |
 | `timeout_s` | float | `10` | HTTP timeout (seconds) for every Immich call. |
 | `image_size` | enum | `fullsize` | `preview` (~1440px on the long edge) or `fullsize` (original-resolution JPEG; Immich transcodes HEIC/RAW). `fullsize` is right for 4K displays. |
 
