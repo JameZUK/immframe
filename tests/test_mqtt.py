@@ -23,6 +23,11 @@ from immframe.interfaces.mqtt import (
 class _StubController:
     """Minimal duck-typed controller for MQTT tests."""
 
+    def set_live_photo(self, **kw):
+        self.live_calls.append(kw)
+        self.live_photo.update(kw)
+        return self.live_photo
+
     def __init__(self):
         self.paused = False
         self.selection_mode = "random"
@@ -33,6 +38,9 @@ class _StubController:
         self.display_is_on = True
         self.show_text = ["title", "date"]
         self.show_clock = False
+        self.live_photo = {"mode": "once", "hold_s": 1.0, "play_s": 6.0, "repeats": 0,
+                           "speed": 1.0, "pause_s": 0.0, "after": "still"}
+        self.live_calls = []
         self.time_delay = 60.0
         self.fade_time = 4.0
         self.collage_enabled = False
@@ -503,3 +511,16 @@ def test_on_message_failure_doesnt_propagate(mqtt_mod):
     finally:
         # restore so other tests aren't affected
         del type(ctrl).selection_mode
+
+
+
+def test_live_photo_entities_state_and_commands():
+    c = _StubController()
+    mode = next(e for e in ENTITIES if e.object_id == "live_photo_mode")
+    speed = next(e for e in ENTITIES if e.object_id == "live_photo_speed")
+    assert mode.component == "select" and "bounce" in mode.options
+    assert _state_of(c, mode) == "once" and _state_of(c, speed) == "1"
+    _apply_cmd(c, mode, "bounce")
+    _apply_cmd(c, speed, "0.5")
+    assert c.live_calls == [{"mode": "bounce"}, {"speed": 0.5}]
+    assert _state_of(c, mode) == "bounce" and _state_of(c, speed) == "0.5"

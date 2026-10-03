@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 import paho.mqtt.client as mqtt
 
 from ..config import SELECTION_MODES, MqttConfig
+from ..video.live import LIVE_MODES
 
 if TYPE_CHECKING:
     from ..controller import Controller
@@ -112,6 +113,16 @@ ENTITIES: tuple[Entity, ...] = (
         min=2.0, max=12.0, step=1.0,
     ),
 
+    # Live / motion photos
+    Entity(
+        "select", "live_photo_mode", "Live photo style",
+        options=LIVE_MODES, icon="mdi:motion-play-outline",
+    ),
+    Entity(
+        "number", "live_photo_speed", "Live photo speed", icon="mdi:speedometer",
+        min=0.25, max=4.0, step=0.25, unit="x",
+    ),
+
     # Read-only
     Entity(
         "sensor", "current_asset", "Current asset", icon="mdi:image",
@@ -153,6 +164,11 @@ def _state_of(controller: "Controller", entity: Entity) -> str:
         return str(controller.collage_min_tiles)
     if oid == "collage_max_tiles":
         return str(controller.collage_max_tiles)
+    if oid in ("live_photo_mode", "live_photo_speed"):
+        live = getattr(controller, "live_photo", None) or {}
+        if oid == "live_photo_mode":
+            return str(live.get("mode", ""))
+        return f"{live['speed']:g}" if "speed" in live else ""
     if oid == "current_asset":
         a = controller.current_asset
         return a.id if a is not None else ""
@@ -223,6 +239,10 @@ def _apply_cmd(controller: "Controller", entity: Entity, payload: str) -> None:
         controller.collage_layout = s
     elif oid == "collage_min_tiles":
         controller.collage_min_tiles = int(float(s))
+    elif oid == "live_photo_mode":
+        controller.set_live_photo(mode=s)
+    elif oid == "live_photo_speed":
+        controller.set_live_photo(speed=float(s))
     elif oid == "collage_max_tiles":
         controller.collage_max_tiles = int(float(s))
     else:

@@ -24,6 +24,7 @@ from pathlib import Path
 from .collage import is_collage_id
 from .config import SCENE_SOURCES, SELECTION_MODES, Config, SelectionMode
 from .hidden import HiddenList
+from .video.live import live_settings_from, recipe
 from .immich.client import ImmichClient, ImmichError
 from .immich.models import Asset, AssetKind
 from .immich.prefetch import PrefetchWorker
@@ -265,6 +266,8 @@ class Controller:
         # via the control plane. Pushed to the prefetch worker as a fresh copy
         # on every change (see _apply_collage / PrefetchWorker.set_collage).
         self._collage = replace(config.collage)
+        # Live-photo playback style — seeded from config, tunable at runtime.
+        self._live = live_settings_from(config.video).validated()
 
         # Build initial selector
         self._selector: AssetSelector = self._build_selector(self._selection_mode)
@@ -467,10 +470,11 @@ class Controller:
                 #   - video asset displayed as poster:             _play_video_after_poster
                 if asset.live_photo_video_id:
                     self._play_live_photo(asset)
-                elif is_video:
-                    self._play_video_after_poster(asset)
-
-                next_tm = time.time() + time_delay
+                    next_tm = self._after_live_photo(time_delay, fade_time)
+                else:
+                    if is_video:
+                        self._play_video_after_poster(asset)
+                    next_tm = time.time() + time_delay
                 self._next_change_at = next_tm
                 if not loop_running:
                     break
@@ -489,6 +493,40 @@ class Controller:
             if leftover is not None and leftover[0] is not None:
                 leftover[0].unlink(missing_ok=True)
         self._pending_item = self._priority_item = None
+
+    def _after_live_photo(self, time_delay: float, fade_time: float) -> float:
+        """When the next slide is due after a live photo's clip.
+
+        "still": the photo stays for the rest of the slide's time (the clip
+        counts toward `time_delay`), but at least long enough to register.
+        "next": move on as soon as the clip ends."""
+        now = time.time()
+        if self._live.mode == "still":
+            return now + time_delay
+        if self._live.after == "next":
+            return now
+        started = self._slide_started_at or now
+        return max(started + time_delay, now + max(3.0, fade_time + 1.0))
+
+    # ── Live-photo style (runtime-tunable) ──────────────────────────────
+    @property
+    def live_photo(self) -> dict:
+        l = self._live
+        return {"mode": l.mode, "hold_s": l.hold_s, "play_s": l.play_s, "repeats": l.repeats,
+                "speed": l.speed, "pause_s": l.pause_s, "after": l.after}
+
+    def set_live_photo(self, **fields) -> dict:
+        """Update any of mode / hold_s / play_s / repeats / speed / pause_s /
+        after. Takes effect from the next live photo. Raises ValueError for
+        an unknown field or value."""
+        allowed = {"mode", "hold_s", "play_s", "repeats", "speed", "pause_s", "after"}
+        bad = set(fields) - allowed
+        if bad:
+            raise ValueError(f"unknown live-photo setting(s): {sorted(bad)}")
+        self._live = replace(self._live, **fields).validated()
+        log.info("live photo style: %s", self.live_photo)
+        self._publish_state()
+        return self.live_photo
 
     # ── Queue access + portrait pairing ─────────────────────────────────
     def _take_item(self, *, timeout: float):
@@ -557,25 +595,31 @@ class Controller:
         log.info("video play: asset=%s url=%s", asset.id, url)
         self._play_video_url(url, headers)
 
-    def _play_video_url(self, url: str, headers: dict[str, str]) -> None:
-        """Play a video URL through MPV; block until EOF, SIGINT, or
-        config.video.max_play_s ceiling."""
+    def _play_video_url(self, url: str, headers: dict[str, str], *,
+                        max_s: float | None = None, **play_opts) -> None:
+        """Play a video URL through MPV; block until EOF, SIGINT, `max_s`,
+        or the config.video.max_play_s ceiling. `play_opts` go to
+        VideoPlayer.play (vf / loop / speed / hwdec / audio)."""
         if self._video_player is None:
             return
         end_evt = threading.Event()
+        # A clip's own play time, never beyond the global max_play_s ceiling.
+        limit = self._config.video.max_play_s if max_s is None else min(max_s, self._config.video.max_play_s)
         try:
-            self._video_player.play(url, headers=headers, on_end=end_evt.set)
+            self._video_player.play(url, headers=headers, on_end=end_evt.set, **play_opts)
         except Exception as e:
             log.warning("video play failed: %s", e)
             return
         self._video_playing = True
         try:
-            self._wait_video(end_evt)
+            self._wait_video(end_evt, limit)
         finally:
             self._video_playing = False
 
-    def _wait_video(self, end_evt: threading.Event) -> None:
-        deadline = time.time() + max(1.0, self._config.video.max_play_s)
+    def _wait_video(self, end_evt: threading.Event, limit: float | None = None) -> None:
+        if limit is None:
+            limit = self._config.video.max_play_s
+        deadline = time.time() + max(1.0, limit)
         paused_video = False
         while not end_evt.wait(timeout=0.5):
             if self._stop_evt.is_set():
@@ -600,7 +644,10 @@ class Controller:
                 deadline += 0.5
                 continue
             if time.time() > deadline:
-                log.warning("video exceeded max_play_s; stopping")
+                if limit < self._config.video.max_play_s:
+                    log.info("clip reached its play time (%.1fs); stopping", limit)
+                else:
+                    log.warning("video exceeded max_play_s; stopping")
                 self._video_player.stop()
                 return
 
@@ -638,12 +685,18 @@ class Controller:
             or not self._config.video.enabled
         ):
             return
-        self._hold_rendering(max(0.0, self._config.video.live_photo_hold_s))
-        if self._stop_evt.is_set():
+        live = self._live
+        r = recipe(live)
+        if r is None:                                   # mode "still": photo only
             return
+        self._hold_rendering(live.hold_s)
+        if self._stop_evt.is_set() or self._force_next_evt.is_set():
+            return                                      # skipped while the still was up
         url, headers = self._client.video_play_args(asset.live_photo_video_id)
-        log.info("live photo: asset=%s motion=%s", asset.id, asset.live_photo_video_id)
-        self._play_video_url(url, headers)
+        log.info("live photo: asset=%s motion=%s mode=%s speed=%g",
+                 asset.id, asset.live_photo_video_id, live.mode, live.speed)
+        self._play_video_url(url, headers, max_s=r.max_s, vf=r.vf, loop=r.loop,
+                             speed=r.speed, hwdec=live.hwdec, audio=r.audio)
 
     def _play_video_after_poster(self, asset: Asset) -> None:
         """For a VIDEO asset rendered as a matted poster first, hold the

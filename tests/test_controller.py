@@ -738,3 +738,70 @@ def test_unhide_reports_unarchive_failure_but_still_unblocks(tmp_path):
     res = c.unhide(["a" * 36])
     assert res[0]["unhidden"] is True and "un-archiving" in res[0]["error"]
     assert "a" * 36 not in c._hidden
+
+
+# ── Live-photo styles ─────────────────────────────────────────────────────
+
+
+def _live_asset():
+    return _asset("l" * 36, live="m" * 36)
+
+
+def test_live_photo_settings_from_config_and_runtime_update():
+    c = _controller()
+    assert c.live_photo["mode"] == "once" and c.live_photo["speed"] == 1.0
+    out = c.set_live_photo(mode="bounce", speed=0.5, pause_s=0.5, repeats=2)
+    assert out["mode"] == "bounce" and out["speed"] == 0.5 and out["repeats"] == 2
+    with pytest.raises(ValueError):
+        c.set_live_photo(mode="wobble")
+    with pytest.raises(ValueError):
+        c.set_live_photo(colour="red")
+    assert c.live_photo["mode"] == "bounce"                     # unchanged by the failures
+
+
+def test_play_live_photo_hands_the_recipe_to_the_player():
+    c = _controller()
+    c._video_player = MagicMock()
+    c._client.video_play_args.return_value = ("http://clip", {"x-api-key": "k"})
+    c.set_live_photo(mode="bounce", play_s=5, hold_s=0)
+    with patch.object(c, "_play_video_url") as play:
+        c._play_live_photo(_live_asset())
+    args, kw = play.call_args
+    assert args == ("http://clip", {"x-api-key": "k"})
+    assert kw["loop"] == "inf" and kw["max_s"] == 5 and "reverse" in kw["vf"]
+    assert kw["hwdec"] == "no" and kw["audio"] is False
+
+
+def test_play_live_photo_still_mode_never_plays():
+    c = _controller()
+    c._video_player = MagicMock()
+    c.set_live_photo(mode="still")
+    with patch.object(c, "_play_video_url") as play:
+        c._play_live_photo(_live_asset())
+    play.assert_not_called()
+
+
+def test_after_live_photo_timing(monkeypatch):
+    import immframe.controller as cm
+    c = _controller()
+    monkeypatch.setattr(cm.time, "time", lambda: 1000.0)
+    c._slide_started_at = 990.0                                 # slide went up 10 s ago
+    assert c._after_live_photo(60, 4) == 1050.0                 # rest of the slide
+    c._slide_started_at = 900.0                                 # clip ran past the slide time
+    assert c._after_live_photo(60, 4) == 1005.0                 # still shows ≥ fade + 1
+    c.set_live_photo(after="next")
+    assert c._after_live_photo(60, 4) == 1000.0
+    c.set_live_photo(mode="still")
+    assert c._after_live_photo(60, 4) == 1060.0                 # photo-only: a normal slide
+
+
+def test_clip_play_time_capped_by_max_play_s():
+    c = _controller()
+    c._video_player = MagicMock()
+    seen = {}
+    with patch.object(c, "_wait_video", side_effect=lambda evt, limit: seen.setdefault("limit", limit)):
+        c._play_video_url("u", {}, max_s=500)
+        assert seen["limit"] == c._config.video.max_play_s
+        seen.clear()
+        c._play_video_url("u", {}, max_s=4)
+        assert seen["limit"] == 4

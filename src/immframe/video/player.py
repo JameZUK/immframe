@@ -47,6 +47,7 @@ class VideoPlayer:
         self._on_first_frame: Callable[[], None] | None = None
         self._ensure_fullscreen = ensure_fullscreen
         self._fullscreen_opt = bool(fullscreen)
+        self._hwdec_default = hwdec
 
         # python-mpv constructor kwargs map underscore→dash, so `video_rotate`
         # below becomes MPV's --video-rotate option. "auto" is MPV's own
@@ -231,9 +232,18 @@ class VideoPlayer:
         *,
         on_first_frame: Callable[[], None] | None = None,
         on_end: Callable[[], None] | None = None,
+        vf: str = "",
+        loop: str = "no",
+        speed: float = 1.0,
+        hwdec: str | None = None,
+        audio: bool = True,
     ) -> None:
         """Start playback. Returns immediately; observe `on_first_frame` /
-        `on_end` for state changes."""
+        `on_end` for state changes.
+
+        `vf` / `loop` / `speed` / `hwdec` / `audio` are per-clip (live-photo
+        styles, see video/live.py) and are reset to the defaults for every
+        call, so one clip's settings never leak into the next."""
         with self._lock:
             self._on_first_frame = on_first_frame
             self._on_end = on_end
@@ -258,6 +268,17 @@ class VideoPlayer:
                 self._mpv["fullscreen"] = self._fullscreen_opt
             except Exception as e:                      # never block playback on this
                 log.debug("fullscreen reset failed: %s", e)
+            for prop, value in (
+                ("vf", vf or ""),
+                ("loop-file", loop or "no"),
+                ("speed", float(speed)),
+                ("hwdec", hwdec or self._hwdec_default),
+                ("aid", "auto" if audio else "no"),
+            ):
+                try:
+                    self._mpv[prop] = value
+                except Exception as e:
+                    log.warning("mpv %s=%r rejected: %s", prop, value, e)
             self._mpv.command("loadfile", url, "replace")
 
     def stop(self) -> None:

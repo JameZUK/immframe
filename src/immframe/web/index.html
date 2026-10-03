@@ -192,6 +192,31 @@
       </div>
 
       <div class="card">
+        <h3>Live photos</h3>
+        <p class="muted small">Photos with a short clip attached (iPhone Live Photos, Samsung / Pixel motion photos): the photo shows, then the clip plays, then the photo comes back.</p>
+        <div class="field">
+          <span>Clip plays</span>
+          <div class="segmented wrap" id="live-mode">
+            <button type="button" data-value="once">Once</button>
+            <button type="button" data-value="loop">Loop</button>
+            <button type="button" data-value="bounce">Bounce</button>
+            <button type="button" data-value="reverse">Reverse</button>
+            <button type="button" data-value="still">Off</button>
+          </div>
+          <span class="muted small" id="live-mode-hint"></span>
+        </div>
+        <div id="live-timing">
+          <label class="slider"><span>Photo first for <b id="live-hold-value">—</b></span><input type="range" id="live-hold" min="0" max="10" step="0.5"></label>
+          <label class="slider" data-live="repeat"><span>Keep it going for <b id="live-play-value">—</b></span><input type="range" id="live-play" min="0" max="30" step="1"></label>
+          <label class="slider" data-live="single"><span>Stop the clip after <b id="live-cap-value">—</b></span><input type="range" id="live-cap" min="0" max="30" step="1"></label>
+          <label class="slider" data-live="repeat"><span>Or repeat <b id="live-repeats-value">—</b></span><input type="range" id="live-repeats" min="0" max="10" step="1"></label>
+          <label class="slider"><span>Speed <b id="live-speed-value">—</b></span><input type="range" id="live-speed" min="0.25" max="4" step="0.25"></label>
+          <label class="slider" data-live="repeat"><span>Pause at each turn <b id="live-pause-value">—</b></span><input type="range" id="live-pause" min="0" max="3" step="0.25"></label>
+          <label class="switch"><span>Move on as soon as the clip ends</span><input type="checkbox" id="live-after-next"><i></i></label>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Collages</h3>
         <label class="switch"><span><svg class="ic"><use href="#i-grid"/></svg>Make every slide a collage</span><input type="checkbox" id="collage-enabled"><i></i></label>
         <div class="field">

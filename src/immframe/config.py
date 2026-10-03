@@ -133,8 +133,18 @@ class VideoConfig:
     #   "contain" — preserve aspect, letterbox/pillarbox as needed (default)
     #   "cover"   — preserve aspect, fill the screen, crop the overflow
     fit: str = "contain"
-    # How long to hold the still before triggering live-photo motion clip
-    live_photo_hold_s: float = 1.0
+    # Live / motion photos (HEIC/JPEG with a short clip). See video/live.py.
+    live_photo_hold_s: float = 1.0          # still shown before the clip
+    live_photo_mode: str = "once"           # once | loop | bounce | reverse | still
+    live_photo_play_s: float = 6.0          # loop/bounce duration; once/reverse cap (0 = none)
+    live_photo_repeats: int = 0             # loop/bounce: cycles instead of play_s (0 = use play_s)
+    live_photo_speed: float = 1.0           # 0.25 (slow-mo) … 4
+    live_photo_pause_s: float = 0.0         # freeze at each loop point / bounce turnaround
+    live_photo_after: str = "still"         # still = photo for the rest of the slide | next
+    # Software decoding for motion clips: the Pi 4's v4l2m2m decoder plays
+    # phone motion clips (120 fps timebase, variable frame rate) at ~0.2x;
+    # software decodes these small clips in real time.
+    live_photo_hwdec: str = "no"
     # Show the (matted) preview JPEG of a video before playing it. When
     # true: video assets render through pi3d first like images, giving
     # them the mat / blur-edges / fade-in treatment, then MPV takes over
@@ -366,6 +376,13 @@ class Config:
             vo=vid_raw.get("vo", "gpu"),
             fit=str(vid_raw.get("fit", "contain")),
             live_photo_hold_s=float(vid_raw.get("live_photo_hold_s", 1.0)),
+            live_photo_mode=str(vid_raw.get("live_photo_mode", "once")),
+            live_photo_play_s=float(vid_raw.get("live_photo_play_s", 6.0)),
+            live_photo_repeats=int(vid_raw.get("live_photo_repeats", 0)),
+            live_photo_speed=float(vid_raw.get("live_photo_speed", 1.0)),
+            live_photo_pause_s=float(vid_raw.get("live_photo_pause_s", 0.0)),
+            live_photo_after=str(vid_raw.get("live_photo_after", "still")),
+            live_photo_hwdec=str(vid_raw.get("live_photo_hwdec", "no")).strip() or "no",
             poster=bool(vid_raw.get("poster", True)),
             poster_hold_s=float(vid_raw.get("poster_hold_s", 3.0)),
             rotate=rotate_raw,
@@ -380,6 +397,8 @@ class Config:
             raise ValueError(
                 f"video.rotate must be one of {valid_rot}; got {video.rotate!r}"
             )
+        from .video.live import live_settings_from
+        live_settings_from(video).validated()          # raises on a bad mode / after
         if video.fit not in ("contain", "cover"):
             raise ValueError(
                 f"video.fit must be 'contain' or 'cover'; got {video.fit!r}"

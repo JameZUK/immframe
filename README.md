@@ -51,9 +51,13 @@ UX picframe got right.
   EXIF parsing
 - Direct video streaming via [python-mpv](https://github.com/jaseg/python-mpv)
   with KMS/DRM output on the Pi — no local download, no transcode;
-  hardware decoding (`hwdec: auto-copy` → the Pi's v4l2m2m decoder),
-  live / motion photos play their clip after the still, and a fullscreen
-  self-check fixes clips that map in a small window
+  hardware decoding (`hwdec: auto-copy` → the Pi's v4l2m2m decoder)
+- Live / motion photos (iPhone Live Photos, Samsung / Pixel motion
+  photos): the photo shows first, then the clip plays — **once, looped,
+  bounced back and forth ("boomerang"), reversed, or not at all** — with
+  configurable lead-in, run time or repeat count, speed (slow-mo to 4×),
+  a freeze at each turnaround, and whether the photo returns afterwards;
+  all adjustable live from the dashboard
 - Never shows the same few photos on repeat: every mode draws fresh
   random samples (Immich's metadata search is fixed-order), hidden
   live-photo companion clips are filtered out, and blocked photos are

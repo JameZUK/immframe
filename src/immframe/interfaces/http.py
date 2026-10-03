@@ -35,6 +35,7 @@ Endpoints:
     POST /api/config                 {"config": {...}} | {"yaml": "..."}, optional "restart": true
     POST /api/restart                stop so the supervisor relaunches with the config on disk
 
+    POST /api/live_photo             {"mode"?, "hold_s"?, "play_s"?, "repeats"?, "speed"?, "pause_s"?, "after"?}
     POST /api/previous               back to the slide before the one on screen
     POST /api/show                   {"id": "..."} — put a slide from the history back on screen
     GET  /api/timeline               recently shown + up next
@@ -79,6 +80,7 @@ from ..config import SELECTION_MODES, Config, HttpConfig
 from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
 from ..sessions import COOKIE_NAME, SessionManager, clear_cookie_header, cookie_header
+from ..video.live import LIVE_AFTER, LIVE_MODES
 
 if TYPE_CHECKING:
     from ..controller import Controller
@@ -140,6 +142,7 @@ _POST_PATHS = frozenset({
     "/api/favorite",
     "/api/rotate",
     "/api/previous",
+    "/api/live_photo",
     "/api/show",
     "/api/unhide",
     "/api/login",
@@ -564,6 +567,23 @@ class _Handler(BaseHTTPRequestHandler):
                     isinstance(i, str) and _ASSET_ID_RE.match(i) for i in ids):
                 raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'ids': [asset UUIDs]}")
             return self._json(HTTPStatus.OK, {"results": self._ctrl.unhide(ids)})
+        if path == "/api/live_photo":
+            body = self._read_json()
+            if not isinstance(body, dict) or not body:
+                raise _HttpError(HTTPStatus.BAD_REQUEST, "expected an object of live-photo settings")
+            numeric = {"hold_s", "play_s", "repeats", "speed", "pause_s"}
+            for k, v in body.items():
+                if k == "mode" and v not in LIVE_MODES:
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, f"mode must be one of {LIVE_MODES}")
+                if k == "after" and v not in LIVE_AFTER:
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, f"after must be one of {LIVE_AFTER}")
+                if k in numeric and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, f"{k} must be a number")
+            try:
+                self._ctrl.set_live_photo(**body)
+            except ValueError as e:
+                raise _HttpError(HTTPStatus.BAD_REQUEST, str(e))
+            return self._state()
         if path == "/api/previous":
             try:
                 self._ctrl.previous()
@@ -720,6 +740,7 @@ class _Handler(BaseHTTPRequestHandler):
             "pair_asset": self._asset_obj(getattr(c, "pair_asset", None)),
             "hidden_count": getattr(c, "hidden_count", 0),
             "can_go_back": bool(getattr(c, "can_go_back", False)),
+            "live_photo": getattr(c, "live_photo", None),
             "slide_started_at": getattr(c, "slide_started_at", None),
             "next_change_at": getattr(c, "next_change_at", None),
             "video_playing": bool(getattr(c, "video_playing", False)),

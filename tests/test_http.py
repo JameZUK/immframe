@@ -65,6 +65,16 @@ class _StubController:
     timeline_data: dict = {"history": [], "position": None, "upcoming": []}
     blocked: list = []
 
+    live_photo = {"mode": "once", "speed": 1.0}
+    live_calls: list = []
+
+    def set_live_photo(self, **kw):
+        if kw.get("mode") == "explode":
+            raise ValueError("bad")
+        self.live_calls.append(kw)
+        self.live_photo = dict(self.live_photo, **kw)
+        return self.live_photo
+
     def previous(self):
         self.previous_calls += 1
         if self.previous_result is not None:
@@ -1206,3 +1216,14 @@ def test_new_endpoints_require_auth():
             assert requests.get(f"{base}{path}", timeout=2.0).status_code == 401, path
         for path in ("/api/previous", "/api/show", "/api/unhide"):
             assert requests.post(f"{base}{path}", json={}, timeout=2.0).status_code == 401, path
+
+
+
+def test_post_live_photo_validates_and_updates():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/live_photo", json={"mode": "bounce", "speed": 0.5, "pause_s": 1}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and r.json()["live_photo"]["mode"] == "bounce"
+        assert ctrl.live_calls[-1] == {"mode": "bounce", "speed": 0.5, "pause_s": 1}
+        for bad in ({"mode": "wobble"}, {"after": "later"}, {"speed": "fast"}, {"repeats": True}, {}):
+            assert requests.post(f"{base}/api/live_photo", json=bad, timeout=2.0, auth=_auth()).status_code == 400, bad
+        assert requests.post(f"{base}/api/live_photo", json={"mode": "once"}, timeout=2.0).status_code == 401

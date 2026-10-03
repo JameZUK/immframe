@@ -487,3 +487,22 @@ immich:
 selection:
   {bad}
 """))
+
+
+
+def test_live_photo_options_parse_and_validate(tmp_path: Path):
+    cfg = Config.load(_write(tmp_path, "c.yaml", """
+immich: {url: https://immich.example, api_key: k}
+video:
+  live_photo_mode: bounce
+  live_photo_play_s: 9
+  live_photo_repeats: 3
+  live_photo_speed: 0.5
+  live_photo_pause_s: 0.25
+  live_photo_after: next
+"""))
+    v = cfg.video
+    assert (v.live_photo_mode, v.live_photo_play_s, v.live_photo_repeats) == ("bounce", 9.0, 3)
+    assert (v.live_photo_speed, v.live_photo_pause_s, v.live_photo_after, v.live_photo_hwdec) == (0.5, 0.25, "next", "no")
+    with pytest.raises(ValueError, match="live_photo_mode"):
+        Config.load(_write(tmp_path, "d.yaml", "immich: {url: https://x, api_key: k}\nvideo: {live_photo_mode: wobble}\n"))

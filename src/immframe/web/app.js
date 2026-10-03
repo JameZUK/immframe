@@ -28,6 +28,15 @@ let blockedData = [];
 const selected = new Set();
 const touched = new Map();            // control id → last local edit (ms)
 
+const LIVE_HINTS = {
+  once: "Plays forward once.",
+  loop: "Plays forward over and over.",
+  bounce: "Forward, then backward, again and again — a boomerang.",
+  reverse: "Plays backward once — a rewind.",
+  still: "Never plays the clip — just shows the photo.",
+};
+const fmtSec = v => (v === 0 ? "no limit" : fmtDuration(v));
+
 const MODE_LABELS = {
   playlist: "Playlist", random: "Random", favorites: "Favourites", scene: "Scenes",
   people: "People", memory: "On this day", recent: "Recent uploads", album: "Albums", smart: "Smart search",
@@ -341,6 +350,31 @@ function renderControls(s) {
     const on = new Set(s.show_text || []);
     for (const c of $("show-text").children) c.classList.toggle("on", on.has(c.dataset.key));
   }
+  const live = s.live_photo;
+  if (live) {
+    if (fresh("live-mode")) for (const b of $("live-mode").children) b.classList.toggle("on", b.dataset.value === live.mode);
+    const mode = [...$("live-mode").children].find(b => b.classList.contains("on"))?.dataset.value || live.mode;
+    $("live-mode-hint").textContent = LIVE_HINTS[mode] || "";
+    $("live-timing").hidden = mode === "still";
+    const repeating = mode === "loop" || mode === "bounce";
+    for (const n of document.querySelectorAll("[data-live='repeat']")) n.hidden = !repeating;
+    for (const n of document.querySelectorAll("[data-live='single']")) n.hidden = repeating;
+    if (fresh("live-hold")) $("live-hold").value = live.hold_s;
+    if (fresh("live-play")) $("live-play").value = live.play_s;
+    if (fresh("live-cap")) $("live-cap").value = live.play_s;
+    if (fresh("live-repeats")) $("live-repeats").value = live.repeats;
+    if (fresh("live-speed")) $("live-speed").value = live.speed;
+    if (fresh("live-pause")) $("live-pause").value = live.pause_s;
+    if (fresh("live-after-next")) $("live-after-next").checked = live.after === "next";
+    $("live-hold-value").textContent = fmtDuration(Number($("live-hold").value));
+    $("live-play-value").textContent = Number($("live-repeats").value) > 0 ? "(using repeats)" : fmtSec(Number($("live-play").value));
+    $("live-cap-value").textContent = Number($("live-cap").value) === 0 ? "its natural end" : fmtDuration(Number($("live-cap").value));
+    const r = Number($("live-repeats").value);
+    $("live-repeats-value").textContent = r === 0 ? "off — use the time" : `${r} time${r === 1 ? "" : "s"}`;
+    $("live-speed-value").textContent = `${Number($("live-speed").value)}×`;
+    $("live-pause-value").textContent = Number($("live-pause").value) === 0 ? "none" : `${Number($("live-pause").value)}s`;
+  }
+
   const col = s.collage || {};
   if (fresh("collage-enabled")) $("collage-enabled").checked = !!col.enabled;
   if (fresh("collage-layout")) for (const b of $("collage-layout").children) b.classList.toggle("on", b.dataset.value === col.layout);
@@ -625,6 +659,26 @@ function wire() {
       attempt(() => post("/api/collage_layout", { value: b.dataset.value }));
     });
   }
+
+  // Live photos
+  const liveSet = (field, value) => attempt(() => post("/api/live_photo", { [field]: value }));
+  for (const b of $("live-mode").children) {
+    b.addEventListener("click", () => {
+      touch("live-mode");
+      for (const x of $("live-mode").children) x.classList.toggle("on", x === b);
+      if (state) renderControls(state);
+      attempt(() => post("/api/live_photo", { mode: b.dataset.value }), `Live photos: ${b.textContent.toLowerCase()}`);
+    });
+  }
+  for (const [id, field] of [["live-hold", "hold_s"], ["live-play", "play_s"], ["live-cap", "play_s"],
+                             ["live-repeats", "repeats"], ["live-speed", "speed"], ["live-pause", "pause_s"]]) {
+    $(id).addEventListener("input", () => { touch(id); if (state) renderControls(state); });
+    $(id).addEventListener("change", () => { touch(id); liveSet(field, Number($(id).value)); });
+  }
+  $("live-after-next").addEventListener("change", () => {
+    touch("live-after-next");
+    liveSet("after", $("live-after-next").checked ? "next" : "still");
+  });
 
   // Blocked
   $("blocked-filter").addEventListener("input", renderBlocked);

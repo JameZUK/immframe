@@ -353,6 +353,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 28px; }
 .segmented { display: flex; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
 .segmented button { flex: 1; border: 0; background: transparent; padding: 8px; font-size: 13.5px; border-radius: 9px; }
 .segmented button.on { background: var(--surface-3); font-weight: 600; }
+.segmented.wrap { flex-wrap: wrap; }
+.segmented.wrap button { flex: 1 0 auto; min-width: 52px; padding: 8px 6px; }
 .linkcard { display: flex; align-items: center; gap: 14px; color: var(--text); text-decoration: none; }
 .linkcard:hover { border-color: var(--border-strong); }
 .linkcard .ic { width: 24px; height: 24px; color: var(--accent); }
