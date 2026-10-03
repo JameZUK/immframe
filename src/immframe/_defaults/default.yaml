@@ -59,7 +59,7 @@ collage:
   gap: 8                                   # px gutter between tiles + outer margin
   background: "#101018"                    # hex fill shown behind tiles / in the gaps
   fit: cover                               # cover (fill + crop) | contain (letterbox)
-  tile_text: ""                            # per-tile caption fields, e.g. "date location"
+  tile_text: "date location"               # per-tile caption fields when the photos share nothing
                                             # (keys: caption date location name people tags); "" = off
   smart_caption: false                     # one caption for the whole collage when its photos
                                             # share a person/place/date; falls back to tile_text

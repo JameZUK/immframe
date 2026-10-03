@@ -73,6 +73,7 @@
           <svg class="ic"><use href="#i-frame"/></svg>
           <span>Waiting for the first photo…</span>
         </div>
+        <div class="stage-tiles" id="stage-tiles"></div>
         <div class="stage-badges" id="stage-badges"></div>
         <div class="stage-fav" id="stage-fav" hidden><svg class="ic fill"><use href="#i-heart"/></svg></div>
         <div class="stage-paused" id="stage-paused" hidden><svg class="ic fill"><use href="#i-pause"/></svg><span>Paused</span></div>
@@ -95,6 +96,11 @@
         <button type="button" class="action" id="btn-rotate" title="Rotate 90° in Immich (R)"><svg class="ic"><use href="#i-rotate"/></svg><span>Rotate</span></button>
         <button type="button" class="action danger" id="btn-hide" title="Never show this photo again"><svg class="ic"><use href="#i-ban"/></svg><span>Block</span></button>
         <a class="action" id="btn-open" target="_blank" rel="noopener" title="Open in Immich"><svg class="ic"><use href="#i-external"/></svg><span>Immich</span></a>
+      </div>
+
+      <div class="card collage-key" id="collage-key" hidden>
+        <h3>In this collage</h3>
+        <ol class="key-list" id="key-list"></ol>
       </div>
 
       <div class="card details">

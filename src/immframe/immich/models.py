@@ -58,7 +58,22 @@ class Asset:
     # it points to a separate VIDEO asset with the motion clip. The
     # controller shows the still then plays the clip via MPV.
     live_photo_video_id: str | None
+    # Collages only: the photos it was composited from and where each sits
+    # on the canvas (see CollageTile). Empty for every real asset.
+    tiles: tuple["CollageTile", ...] = ()
 
     @property
     def is_portrait(self) -> bool:
         return self.height > self.width
+
+
+@dataclass(frozen=True, slots=True)
+class CollageTile:
+    """One photo inside a collage: the source asset plus its rectangle on the
+    composited canvas, as fractions (0–1) of the canvas width / height — so
+    the dashboard can map it onto the image at any size."""
+    asset: Asset
+    x: float
+    y: float
+    w: float
+    h: float

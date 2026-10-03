@@ -281,7 +281,7 @@ def test_collage_mode_produces_one_composite_item():
     cfg = CollageConfig(enabled=True, min_tiles=3, max_tiles=3, layout="grid", gap=2)
     w = PrefetchWorker(
         selector, client, queue_size=3, empty_backoff_s=0.01,
-        collage=cfg, collage_label=lambda n: f"Test • {n}",
+        collage=cfg,
     )
     w.set_collage_canvas(120, 90)
     w.start()
@@ -296,7 +296,12 @@ def test_collage_mode_produces_one_composite_item():
         w.stop(timeout=2.0)
     assert ocr is None
     assert asset.id.startswith("collage-")
-    assert asset.caption == "Test • 3"
+    assert asset.caption == "3 photos"                  # no shared people/place/date → summary
+    assert [t.asset.id for t in asset.tiles] == ["a", "b", "c"]
+    # grid of 3 on 120x90 with gap 2: every tile inside the canvas, as fractions
+    for t in asset.tiles:
+        assert 0 <= t.x < 1 and 0 <= t.y < 1 and 0 < t.w <= 1 and 0 < t.h <= 1
+        assert t.x + t.w <= 1.0001 and t.y + t.h <= 1.0001
     assert magic == b"\xff\xd8"
 
 

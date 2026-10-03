@@ -692,8 +692,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _version(self) -> None:
         self._json(HTTPStatus.OK, {"version": __version__})
 
-    @staticmethod
-    def _asset_obj(asset) -> dict | None:
+    @classmethod
+    def _asset_obj(cls, asset) -> dict | None:
         if asset is None:
             return None
         camera = " ".join(p for p in (asset.camera_make, asset.camera_model) if p)
@@ -711,6 +711,12 @@ class _Handler(BaseHTTPRequestHandler):
             "is_collage": is_collage_id(asset.id),
             "live": bool(asset.live_photo_video_id),
             "portrait": asset.is_portrait,
+            # Collages: each photo in it and where it sits (fractions of the
+            # image), for the dashboard's numbered key.
+            "tiles": [
+                dict(cls._asset_obj(t.asset), rect=[round(t.x, 4), round(t.y, 4), round(t.w, 4), round(t.h, 4)])
+                for t in getattr(asset, "tiles", ())
+            ],
         }
 
     def _state(self) -> None:

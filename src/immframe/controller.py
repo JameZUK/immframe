@@ -285,7 +285,6 @@ class Controller:
             # these layout/tile settings. The composite flows through the
             # render path unchanged; label reflects the active selection.
             collage=replace(self._collage),
-            collage_label=self._collage_label,
             cache_dir=config.selection.cache_dir or None,
             is_hidden=self._hidden.__contains__,
         )
@@ -812,17 +811,24 @@ class Controller:
         return self._hidden.entries()
 
     def _find_asset(self, asset_id: str) -> Asset | None:
-        for a in (self._current_asset, self._pair_asset):
-            if a is not None and a.id == asset_id:
+        def match(a):
+            if a is None:
+                return None
+            if a.id == asset_id:
                 return a
+            return next((t.asset for t in a.tiles if t.asset.id == asset_id), None)  # photo inside a collage
+
+        for a in (self._current_asset, self._pair_asset):
+            if (hit := match(a)) is not None:
+                return hit
         with self._hist_lock:
             for e in reversed(self._history):
                 for a in (e["asset"], e["pair"]):
-                    if a is not None and a.id == asset_id:
-                        return a
+                    if (hit := match(a)) is not None:
+                        return hit
         for a in self._prefetch.peek():
-            if a.id == asset_id:
-                return a
+            if (hit := match(a)) is not None:
+                return hit
         return None
 
     # ── History / previous / timeline ───────────────────────────────────
@@ -1176,13 +1182,6 @@ class Controller:
         carry a label."""
         sel = self._selector
         return getattr(sel, "current_scene", None)
-
-    def _collage_label(self, n: int) -> str:
-        """Generic label for a collage's synthetic asset, e.g. 'beach • 4
-        photos' or 'Random • 4 photos'. Called from the prefetch thread."""
-        scene = self.current_scene
-        base = scene if scene else self._selection_mode.capitalize()
-        return f"{base} • {n} photo{'s' if n != 1 else ''}"
 
     # ── Collage (runtime-tunable) ────────────────────────────────────────
     def _apply_collage(self) -> None:

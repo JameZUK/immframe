@@ -333,7 +333,7 @@ immich:
     assert cfg.collage.min_tiles == 3
     assert cfg.collage.max_tiles == 6
     assert cfg.collage.fit == "cover"
-    assert cfg.collage.tile_text == ""
+    assert cfg.collage.tile_text == "date location"     # tiles captioned when nothing is shared
     assert cfg.collage.smart_caption is False
 
 

@@ -237,6 +237,7 @@ function render(s) {
     if (a.live) badges.append(el("span", { class: "badge-pill" }, icon("i-live"), "Live photo"));
     if (pa) badges.append(el("span", { class: "badge-pill" }, icon("i-columns"), "Pair"));
   }
+  renderCollage(a);
   $("stage-fav").hidden = !(a && a.favorite);
   $("stage-paused").hidden = !s.paused;
   $("stage-title").textContent = a ? titleOf(a) + (pa ? `  +  ${titleOf(pa)}` : "") : "—";
@@ -261,10 +262,20 @@ function render(s) {
   // Details
   $("mode-chip").textContent = MODE_LABELS[s.selection_mode] || s.selection_mode;
   $("scene-label").textContent = s.current_scene || "";
-  $("meta-date").textContent = a && a.taken_at ? new Date(a.taken_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";
-  $("meta-where").textContent = (a && place(a)) || "—";
-  $("meta-camera").textContent = (a && a.camera) || "—";
-  $("meta-file").textContent = (a && a.file) || "—";
+  if (a && a.is_collage && a.tiles && a.tiles.length) {
+    // A collage: summarise what's in it (the key below lists each photo).
+    const ds = a.tiles.map(t => t.taken_at).filter(Boolean).sort();
+    const first = ds.length ? fmtDate(ds[0]) : "", last = ds.length ? fmtDate(ds[ds.length - 1]) : "";
+    $("meta-date").textContent = first ? (first === last ? first : `${first} – ${last}`) : "—";
+    $("meta-where").textContent = [...new Set(a.tiles.map(t => t.city || t.country).filter(Boolean))].join(", ") || "—";
+    $("meta-camera").textContent = [...new Set(a.tiles.map(t => t.camera).filter(Boolean))].join(", ") || "—";
+    $("meta-file").textContent = a.file || "—";
+  } else {
+    $("meta-date").textContent = a && a.taken_at ? new Date(a.taken_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";
+    $("meta-where").textContent = (a && place(a)) || "—";
+    $("meta-camera").textContent = (a && a.camera) || "—";
+    $("meta-file").textContent = (a && a.file) || "—";
+  }
 
   // Blocked counts
   const n = s.hidden_count || 0;
@@ -276,6 +287,51 @@ function render(s) {
 
   renderControls(s);
   tick();
+}
+
+// ── Collage key ───────────────────────────────────────────────────────────
+
+let collageKeyId = null;
+
+function tileTitle(t) { return place(t) || t.file || "Photo"; }
+function hotTile(i, on) {
+  const m = $("stage-tiles").children[i], k = $("key-list").children[i];
+  if (m) m.classList.toggle("hot", on);
+  if (k) k.classList.toggle("hot", on);
+}
+
+function keyItem(t, i, onClick) {
+  const li = el("li", { class: "key-item", title: t.file || "", on: { click: onClick } },
+    el("span", { class: "key-no", text: String(i + 1) }),
+    el("img", { src: thumbSrc(t), alt: "", loading: "lazy", decoding: "async" }),
+    el("span", { class: "key-text" },
+      el("span", { class: "key-title", text: tileTitle(t) }),
+      el("span", { class: "key-sub", text: [fmtDate(t.taken_at), t.camera].filter(Boolean).join(" · ") || t.file || "" })));
+  return li;
+}
+
+function renderCollage(a) {
+  const tiles = (a && a.is_collage && a.tiles) || [];
+  $("stage").classList.toggle("collage", tiles.length > 0);
+  $("collage-key").hidden = tiles.length === 0;
+  const id = tiles.length ? a.id : null;
+  if (id === collageKeyId) return;                 // unchanged collage: keep hover state
+  collageKeyId = id;
+  const markers = $("stage-tiles"), list = $("key-list");
+  markers.replaceChildren(); list.replaceChildren();
+  tiles.forEach((t, i) => {
+    const [x, y, w, h] = t.rect;
+    const m = el("div", {
+      class: "stage-tile", title: tileTitle(t),
+      on: { click: () => openSheet(t, "tile"), mouseenter: () => hotTile(i, true), mouseleave: () => hotTile(i, false) },
+    }, el("span", { class: "tile-no", text: String(i + 1) }));
+    Object.assign(m.style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
+    markers.append(m);
+    const li = keyItem(t, i, () => openSheet(t, "tile"));
+    li.addEventListener("mouseenter", () => hotTile(i, true));
+    li.addEventListener("mouseleave", () => hotTile(i, false));
+    list.append(li);
+  });
 }
 
 function loadStage(a, pa) {
@@ -408,7 +464,12 @@ async function loadTimeline() {
 
 function tile(a, { label, tag, num, current, onClick }) {
   const t = el("button", { type: "button", class: "tile" + (current ? " current" : ""), title: titleOf(a), on: { click: onClick } });
-  if (a.is_collage) {
+  if (a.is_collage && a.tiles && a.tiles.length) {
+    const pics = a.tiles.slice(0, 4);
+    t.append(el("span", { class: `mosaic n${pics.length}` },
+      ...pics.map(p => el("img", { src: thumbSrc(p), alt: "", loading: "lazy", decoding: "async" }))));
+    if (!tag) tag = { icon: "i-grid", text: `${a.tiles.length} photos` };
+  } else if (a.is_collage) {
     t.classList.add("placeholder");
     t.append(icon("i-grid"));
   } else {
@@ -536,7 +597,10 @@ async function block(asset) {
 // ── Detail sheet ──────────────────────────────────────────────────────────
 
 function openSheet(a, source) {
-  $("sheet-img").src = a.is_collage ? "" : previewSrc(a);
+  // Past collages aren't kept on disk; only the one on screen has an image.
+  const noImage = a.is_collage && source !== "current";
+  $("sheet-img").parentElement.hidden = noImage;
+  if (noImage) $("sheet-img").removeAttribute("src"); else $("sheet-img").src = previewSrc(a);
   $("sheet-img").alt = titleOf(a);
   $("sheet-title").textContent = source === "blocked" ? (a.file || titleOf(a) || `Asset ${a.id}`) : titleOf(a);
   const sub = source === "blocked"
@@ -548,14 +612,21 @@ function openSheet(a, source) {
   acts.replaceChildren();
   const btn = (text, ic, cls, fn) => el("button", { type: "button", class: "btn " + cls, on: { click: async () => { closeSheet(); await fn(); } } }, icon(ic), text);
   if (a.is_collage) {
-    acts.append(el("p", { class: "muted small", text: "Collages are made on the frame from several photos, so they can't be shown again or blocked." }));
+    const tiles = a.tiles || [];
+    if (tiles.length) {
+      const list = el("ol", { class: "key-list sheet-list" });
+      tiles.forEach((t, i) => list.append(keyItem(t, i, () => { closeSheet(); openSheet(t, "tile"); })));
+      acts.append(el("p", { class: "muted small", text: "The photos in this collage — tap one to block it or open it in Immich." }), list);
+    } else {
+      acts.append(el("p", { class: "muted small", text: "Collages are made on the frame from several photos, so they can't be shown again." }));
+    }
   } else if (source === "blocked") {
     acts.append(btn("Unblock", "i-undo", "primary", () => unblock([a.id])));
   } else {
     if (source === "history") {
       acts.append(btn("Show again", "i-replay", "primary", () => attempt(() => post("/api/show", { id: a.id }), "Coming up on the frame")));
     }
-    acts.append(btn(source === "upcoming" ? "Skip & block" : "Block", "i-ban", "danger", () => block(a)));
+    acts.append(btn(source === "upcoming" ? "Skip & block" : source === "tile" ? "Block this photo" : "Block", "i-ban", "danger", () => block(a)));
   }
   const link = !a.is_collage && immichLink(a.id);
   if (link) acts.append(el("a", { class: "btn", href: link, target: "_blank", rel: "noopener" }, icon("i-external"), "Open in Immich"));

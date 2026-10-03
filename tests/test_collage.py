@@ -293,3 +293,49 @@ def test_make_collage_asset():
     assert a.live_photo_video_id is None
     assert is_collage_id(a.id) is True
     assert is_collage_id("abc12345-real-asset") is False
+
+
+# ── Summary label + tile geometry ──────────────────────────────────────────
+
+
+def _geo(city=None, country=None):
+    from immframe.immich.models import GeoInfo
+    return GeoInfo(None, None, city, None, country)
+
+
+def test_collage_summary_mixed_photos():
+    from immframe.collage import collage_summary
+    assets = [
+        _capasset(taken_at=datetime(2014, 6, 1), geo=_geo("Barcelona", "Spain"), people=("Sue",)),
+        _capasset(taken_at=datetime(2021, 8, 1), geo=_geo("York", "UK"), people=("Sue", "James")),
+        _capasset(taken_at=datetime(2019, 1, 1), geo=_geo("Barcelona", "Spain")),
+        _capasset(geo=_geo(None, "France")),
+    ]
+    s = collage_summary(assets, "Albrighton")
+    assert s == "Albrighton · 4 photos · 2014–2021 · Barcelona, York +1 · with Sue & James"
+
+
+def test_collage_summary_minimal_and_same_month():
+    from immframe.collage import collage_summary
+    assert collage_summary([_capasset(), _capasset()]) == "2 photos"
+    same = [_capasset(taken_at=datetime(2020, 3, 1)), _capasset(taken_at=datetime(2020, 3, 9))]
+    assert collage_summary(same) == "2 photos · Mar 2020"
+    year = [_capasset(taken_at=datetime(2020, 3, 1)), _capasset(taken_at=datetime(2020, 9, 9))]
+    assert collage_summary(year) == "2 photos · 2020"
+
+
+def test_render_collage_reports_rects(tmp_path):
+    srcs = [_make_jpeg(tmp_path / f"{i}.jpg") for i in range(3)]
+    rects: list = []
+    ok = render_collage(srcs, [False] * 3, tmp_path / "out.jpg", canvas_size=(160, 90), gap=4,
+                        background="#000", fit="cover", layout="grid", rects_out=rects)
+    assert ok and len(rects) == 3
+    _assert_valid(rects, 3, 160, 90)
+
+
+def test_make_collage_asset_carries_tiles():
+    from immframe.immich.models import CollageTile
+    t = CollageTile(_capasset(id="p1"), 0.0, 0.0, 0.5, 1.0)
+    a = make_collage_asset("collage-1", "2 photos", 2, (t,))
+    assert a.tiles == (t,) and a.tiles[0].asset.id == "p1"
+    assert make_collage_asset("collage-2", "x", 2).tiles == ()

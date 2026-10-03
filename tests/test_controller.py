@@ -192,19 +192,6 @@ def test_current_scene_none_outside_scene_mode():
     assert c.current_scene is None
 
 
-def test_collage_label_uses_mode_and_count():
-    c = _controller()
-    assert c._collage_label(4) == "Random • 4 photos"
-    assert c._collage_label(1) == "Random • 1 photo"
-
-
-def test_collage_label_uses_scene_when_present():
-    c = _controller()
-    c.selection_mode = "scene"
-    c._selector._current_scene = "beach"
-    assert c._collage_label(3) == "beach • 3 photos"
-
-
 def test_collage_enabled_toggle_pushes_config_to_prefetch():
     c = _controller()
     c.collage_enabled = True
@@ -805,3 +792,15 @@ def test_clip_play_time_capped_by_max_play_s():
         seen.clear()
         c._play_video_url("u", {}, max_s=4)
         assert seen["limit"] == 4
+
+
+def test_block_photo_inside_a_collage_finds_its_details(tmp_path):
+    from immframe.collage import make_collage_asset
+    from immframe.immich.models import CollageTile
+    c = _controller_with_hidden(tmp_path)
+    inner = _asset("i" * 36, live="j" * 36)
+    col = make_collage_asset("collage-3", "2 photos", 2, (CollageTile(inner, 0, 0, .5, 1), CollageTile(_asset("k" * 36), .5, 0, .5, 1)))
+    _show(c, col)
+    c.hide_asset(inner.id)
+    e = c.hidden_entries()[0]
+    assert e["id"] == inner.id and e["file"] == "x.jpg" and e["companions"] == ["j" * 36]

@@ -1227,3 +1227,19 @@ def test_post_live_photo_validates_and_updates():
         for bad in ({"mode": "wobble"}, {"after": "later"}, {"speed": "fast"}, {"repeats": True}, {}):
             assert requests.post(f"{base}/api/live_photo", json=bad, timeout=2.0, auth=_auth()).status_code == 400, bad
         assert requests.post(f"{base}/api/live_photo", json={"mode": "once"}, timeout=2.0).status_code == 401
+
+
+def test_state_serialises_collage_tiles():
+    from immframe.collage import make_collage_asset
+    from immframe.immich.models import CollageTile
+    with _server() as (base, ctrl, _):
+        a = _asset()
+        ctrl.current_asset = make_collage_asset("collage-9", "2 photos", 2, (
+            CollageTile(a, 0.0, 0.0, 0.5, 1.0), CollageTile(a, 0.5, 0.0, 0.5, 1.0)))
+        body = requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()
+        cur = body["current_asset"]
+        assert cur["is_collage"] and len(cur["tiles"]) == 2
+        assert cur["tiles"][1]["rect"] == [0.5, 0.0, 0.5, 1.0]
+        assert cur["tiles"][0]["city"] == "Reykjavík" and cur["tiles"][0]["file"] == "IMG_0001.jpg"
+        ctrl.current_asset = _asset()
+        assert requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()["current_asset"]["tiles"] == []

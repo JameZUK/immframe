@@ -193,6 +193,11 @@ def _attrs_of(controller: "Controller", entity: Entity) -> dict | None:
             "favorite": a.favorite,
             "scene": scene,
             "paired_with": getattr(getattr(controller, "pair_asset", None), "id", None),
+            "collage_photos": [
+                {"file": t.asset.original_file_name, "city": t.asset.geo.city,
+                 "taken_at": t.asset.taken_at.isoformat() if t.asset.taken_at else None}
+                for t in getattr(a, "tiles", ())
+            ] or None,
         }
     return None
 

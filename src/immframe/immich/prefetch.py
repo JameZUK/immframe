@@ -78,7 +78,6 @@ class PrefetchWorker:
         empty_backoff_s: float = 5.0,
         wants_ocr: Callable[[], bool] | None = None,
         collage: "CollageConfig | None" = None,
-        collage_label: Callable[[int], str] | None = None,
         cache_dir: str | Path | None = None,
         is_hidden: Callable[[str], bool] | None = None,
     ) -> None:
@@ -93,7 +92,6 @@ class PrefetchWorker:
         # one asset. Canvas defaults until the controller learns the display
         # size (set_collage_canvas) at start().
         self._collage = collage
-        self._collage_label = collage_label
         self._collage_canvas: tuple[int, int] = (1920, 1080)
         self._seq = 0                                   # unique temp-file suffix
         self._selector_lock = threading.Lock()
@@ -333,29 +331,33 @@ class PrefetchWorker:
 
         from ..collage import (
             render_collage, make_collage_asset, asset_caption,
-            smart_collage_caption, combined_caption, COLLAGE_ID_PREFIX,
+            smart_collage_caption, combined_caption, collage_summary, COLLAGE_ID_PREFIX,
         )
+        from .models import CollageTile
         stem = f"{COLLAGE_ID_PREFIX}{self._next_seq()}"
         dest = self._tmp_dir / f"{stem}.jpg"
         assets = [a for _, a in sources]
         count = len(sources)
-        label = self._collage_label(count) if self._collage_label else f"{count} photos"
+        scene = getattr(selector, "current_scene", None)
+        if not isinstance(scene, str):
+            scene = None
 
         # Smart caption first: if the photos share people/place/date, draw one
-        # caption for the whole collage and use it as the label. Otherwise fall
-        # back to per-tile captions (tile_text).
+        # caption for the whole collage and use it as the label. Otherwise each
+        # tile gets its own caption (tile_text, default "date location") and
+        # the label summarises the mix (years, places, people).
         title = None
         captions = None
         if getattr(cfg, "smart_caption", False):
-            scene = getattr(selector, "current_scene", None)
             overall = combined_caption(scene, smart_collage_caption(assets))
             if overall:
                 title = overall
-                label = overall
         if title is None and (getattr(cfg, "tile_text", "") or "").strip():
             fields = cfg.tile_text.split()
             captions = [asset_caption(a, fields) for a in assets]
+        label = title or collage_summary(assets, scene)
 
+        rects: list = []
         ok = render_collage(
             [p for p, _ in sources],
             [a.is_portrait for a in assets],
@@ -367,13 +369,19 @@ class PrefetchWorker:
             layout=cfg.layout,
             captions=captions,
             title=title,
+            rects_out=rects,
         )
         self._cleanup_sources(sources)                  # composite is self-contained
         if not ok:
             dest.unlink(missing_ok=True)
             return None
 
-        return (dest, make_collage_asset(stem, label, count), None)
+        cw, ch = self._collage_canvas
+        tiles = tuple(
+            CollageTile(a, r.x / cw, r.y / ch, r.w / cw, r.h / ch)
+            for a, r in zip(assets, rects)
+        )
+        return (dest, make_collage_asset(stem, label, count, tiles), None)
 
     def _cleanup_sources(self, sources: list[tuple[Path, Asset]]) -> None:
         for path, _ in sources:

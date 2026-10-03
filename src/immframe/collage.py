@@ -120,6 +120,38 @@ def smart_collage_caption(
     return " · ".join(parts)
 
 
+def collage_summary(assets, scene: str | None = None) -> str:
+    """A one-line description of a collage whose photos *don't* all share
+    something (for the frame's overlay and the dashboard): the theme, how
+    many photos, the span of years, the main places and people — e.g.
+    "Albrighton · 6 photos · 2014–2021 · Barcelona, York +2 · with Sue & James"."""
+    from collections import Counter
+    parts: list[str] = []
+    if scene:
+        parts.append(scene)
+    n = len(assets)
+    parts.append(f"{n} photo{'s' if n != 1 else ''}")
+    dates = sorted(a.taken_at for a in assets if a.taken_at is not None)
+    if dates:
+        first, last = dates[0], dates[-1]
+        if first.year != last.year:
+            parts.append(f"{first.year}–{last.year}")
+        elif (first.month, first.year) != (last.month, last.year):
+            parts.append(str(first.year))
+        else:
+            parts.append(first.strftime("%b %Y"))
+    places = Counter(a.geo.city or a.geo.country for a in assets if a.geo.city or a.geo.country)
+    if places:
+        top = [p for p, _ in places.most_common(2)]
+        more = len(places) - len(top)
+        parts.append(", ".join(top) + (f" +{more}" if more else ""))
+    people = Counter(p for a in assets for p in a.people)
+    if people:
+        names = [p for p, _ in people.most_common(2)]
+        parts.append("with " + " & ".join(names))
+    return " · ".join(parts)
+
+
 def combined_caption(scene: str | None, smart: str) -> str:
     """Merge a selection theme label (scene/person name, 'Last 7 days', …)
     with the smart metadata caption, skipping the theme when it's already
@@ -266,8 +298,10 @@ def _draw_tile_caption(draw, text: str, rect: Rect, base_fs: int, cache: dict) -
     text = _truncate(draw, text, font, rect.w - 2 * margin)
     if not text:
         return
+    # Top-left of the tile: the frame's own overlay strip covers the bottom
+    # of the screen while it's showing, which would hide the bottom row.
     x = round(rect.x) + margin
-    y = round(rect.y + rect.h) - fs - margin
+    y = round(rect.y) + margin
     # White text with a black outline reads on any photo, no backing strip.
     draw.text(
         (x, y), text, font=font, fill=(255, 255, 255),
@@ -303,6 +337,7 @@ def render_collage(
     layout: str,
     captions: list[str] | None = None,
     title: str | None = None,
+    rects_out: list | None = None,
 ) -> bool:
     """Composite `image_paths` into one JPEG at `dest`. Returns True on success.
 
@@ -318,6 +353,8 @@ def render_collage(
         return False
     chosen = choose_layout(layout, n, is_portrait)
     rects = layout_rects(chosen, n, canvas_size[0], canvas_size[1], gap)
+    if rects_out is not None:                          # caller wants the tile geometry
+        rects_out.extend(rects)
     canvas = Image.new("RGB", canvas_size, parse_hex_color(background))
 
     for path, rect in zip(image_paths, rects):
@@ -346,7 +383,7 @@ def render_collage(
         _draw_collage_title(draw, title, canvas_size)
     elif captions and any(captions):
         draw = ImageDraw.Draw(canvas)
-        base_fs = max(14, round(canvas_size[1] * 0.024))
+        base_fs = max(14, round(canvas_size[1] * 0.032))   # ~70 px on 4K: readable across a room
         font_cache: dict = {}
         for cap, rect in zip(captions, rects):
             if cap:
@@ -364,9 +401,11 @@ def render_collage(
     return True
 
 
-def make_collage_asset(stem: str, label: str, count: int):
+def make_collage_asset(stem: str, label: str, count: int, tiles: tuple = ()):
     """A synthetic `Asset` standing in for the composited collage so it flows
-    through the render path and surfaces a generic label in overlay / state."""
+    through the render path. `label` is what the frame's overlay shows;
+    `tiles` (CollageTile) carry each photo's details and position for the
+    dashboard's key."""
     from .immich.models import Asset, AssetKind, GeoInfo
     return Asset(
         id=stem,
@@ -385,4 +424,5 @@ def make_collage_asset(stem: str, label: str, count: int):
         people=(),
         favorite=False,
         live_photo_video_id=None,
+        tiles=tuple(tiles),
     )
