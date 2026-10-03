@@ -46,6 +46,7 @@ class VideoPlayer:
         self._on_end: Callable[[], None] | None = None
         self._on_first_frame: Callable[[], None] | None = None
         self._ensure_fullscreen = ensure_fullscreen
+        self._fullscreen_opt = bool(fullscreen)
 
         # python-mpv constructor kwargs map underscore→dash, so `video_rotate`
         # below becomes MPV's --video-rotate option. "auto" is MPV's own
@@ -242,6 +243,21 @@ class VideoPlayer:
                 self._mpv["http-header-fields"] = hdr_str
             else:
                 self._mpv["http-header-fields"] = ""
+            # Reset fullscreen to the configured value before every clip.
+            # This one MPV instance outlives each clip's window (keep_open=no
+            # destroys it at EOF; the next loadfile maps a new one), and MPV
+            # carries `fullscreen` over from the last window — which the
+            # compositor (or the self-check below) set to yes. A new window
+            # that maps already requesting fullscreen collides with labwc's
+            # ToggleFullscreen rule and gets toggled back to native size: the
+            # "tiny window that jumps to fullscreen a second later" seen on
+            # every other live-photo clip. Mapping windowed lets the
+            # compositor fullscreen it from the first frame (verified on the
+            # frame: 3/3 clips fullscreen at 0.7 s vs. alternating before).
+            try:
+                self._mpv["fullscreen"] = self._fullscreen_opt
+            except Exception as e:                      # never block playback on this
+                log.debug("fullscreen reset failed: %s", e)
             self._mpv.command("loadfile", url, "replace")
 
     def stop(self) -> None:
