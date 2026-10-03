@@ -50,7 +50,16 @@ UX picframe got right.
 - Date / location overlay text — fields come straight from Immich, no
   EXIF parsing
 - Direct video streaming via [python-mpv](https://github.com/jaseg/python-mpv)
-  with KMS/DRM output on the Pi — no local download, no transcode
+  with KMS/DRM output on the Pi — no local download, no transcode;
+  hardware decoding (`hwdec: auto-copy` → the Pi's v4l2m2m decoder),
+  live / motion photos play their clip after the still, and a fullscreen
+  self-check fixes clips that map in a small window
+- Never shows the same few photos on repeat: every mode draws fresh
+  random samples (Immich's metadata search is fixed-order), hidden
+  live-photo companion clips are filtered out, and blocked photos are
+  dropped even after they've been queued
+- Speaks Immich 3.2's structured search filters (and the older flat
+  fields on earlier servers — detected from `/server/version`)
 - Graceful degradation if Immich is briefly unavailable
 - Home Assistant integration via MQTT auto-discovery — see
   [docs/home-assistant.md](./docs/home-assistant.md) for entities and a
@@ -73,20 +82,26 @@ UX picframe got right.
   through the same loader the daemon uses, and *Save & restart*
 - CLI for ops:
   `immframe doctor` (checks Immich + the kiosk and prints fixes),
-  `immframe state`, `immframe pause`, `immframe next`,
+  `immframe state`, `immframe pause`, `immframe next`, `immframe previous`,
+  `immframe favorite`, `immframe rotate`, `immframe hide`,
   `immframe brightness 0.5`, `immframe mode smart`,
   `immframe query "sunsets"`, `immframe random 5`, etc.
 
 ## Status
 
-**Phase 1 + 2 complete.** Slideshow with four switchable selection modes,
-MQTT control with Home Assistant auto-discovery, REST API for monitoring
-and command, and a built-in web dashboard. The frame is controlled entirely
-via HA, HTTP, or the dashboard — there's no on-device input (no keyboard,
-mouse, or touch).
+In daily use on a Raspberry Pi 4 driving a 4K TV. Nine switchable
+selection modes (one is a playlist mixing the others) and collages, MQTT control with Home
+Assistant auto-discovery, a REST API, a web dashboard with sign-in, a
+settings editor, and `immframe doctor` for diagnosis. The frame is
+controlled entirely via HA, HTTP, or the dashboard — there's no on-device
+input (no keyboard, mouse, or touch).
 
-151 unit tests across config, Immich client, selectors, prefetch worker,
-MQTT, HTTP, and the controller.
+445 unit tests across config, the Immich client, selectors, prefetch
+worker, controller, sessions, the block list, MQTT, HTTP and the doctor.
+
+Parked ideas are written up in [docs/ideas/](./docs/ideas/) — e.g.
+[ML orientation detection](./docs/ideas/ml-orientation.md) for photos
+whose rotation metadata is missing.
 
 ## Quick start
 
@@ -106,6 +121,20 @@ chmod 600 ~/.config/immframe/config.yaml
 
 .venv/bin/immframe
 ```
+
+To use the dashboard, enable it and set a login:
+
+```yaml
+control:
+  http:
+    enabled: true
+    bind: 0.0.0.0          # reachable from the LAN
+    username: you
+    password: something-long
+```
+
+then open `http://<pi-ip>:8080/`. After that most settings can be changed
+from the dashboard's Settings page.
 
 The single config file holds everything — Immich URL, API key, MQTT and
 HTTP credentials. Any string value supports `${ENV_VAR}` substitution if
