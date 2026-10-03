@@ -55,11 +55,18 @@ UX picframe got right.
 - Home Assistant integration via MQTT auto-discovery — see
   [docs/home-assistant.md](./docs/home-assistant.md) for entities and a
   ready-made Lovelace card
-- Built-in web dashboard at `http://<pi-ip>:8080/` — phone-friendly remote
-  for pause / next / mode / brightness / overlay fields / clock, plus
-  **♥ Favourite**, **↻ Rotate** and **Never show again** for the photo on screen
-  (curate the frame from the sofa — hides instantly, stars/archives in
-  Immich when the key can write)
+- Built-in web dashboard at `http://<pi-ip>:8080/` — a phone-first app with
+  a proper sign-in page (persistent "keep me signed in" sessions, no
+  browser password popup):
+  - **Now**: the photo on the frame with a live countdown, ⏮ Previous /
+    ⏯ Pause / ⏭ Next, and ♥ Favourite, ↻ Rotate, ⊘ Block and *Open in Immich*
+  - **Timeline**: what's coming up next and everything recently shown —
+    tap a photo to show it again or block it
+  - **Blocked**: every photo you've blocked, filterable, with one-tap
+    (or bulk) unblock that also un-archives it in Immich
+  - **Controls**: mode, timing, brightness, screen power, clock, caption
+    fields and collages
+  - keyboard shortcuts on desktop (← → space F R), light and dark themes
 - **Settings page** (`/config`) edits `config.yaml` from the phone: a
   playlist builder (add / reorder / per-mode options / collage), every
   common setting as a form, a raw-YAML tab for the rest, validation

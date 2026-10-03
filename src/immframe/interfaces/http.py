@@ -35,14 +35,32 @@ Endpoints:
     POST /api/config                 {"config": {...}} | {"yaml": "..."}, optional "restart": true
     POST /api/restart                stop so the supervisor relaunches with the config on disk
 
-All control endpoints require Basic auth when `config.control.http.auth=true`.
-Image proxying does too — it would be silly to gate the controls but leak
-the gallery.
+    POST /api/previous               back to the slide before the one on screen
+    POST /api/show                   {"id": "..."} — put a slide from the history back on screen
+    GET  /api/timeline               recently shown + up next
+    GET  /api/hidden                 the block list
+    POST /api/unhide                 {"ids": [...]} — unblock (and un-archive in Immich)
+    GET  /api/thumb/<asset_id>       small thumbnail proxy (timeline / block list tiles)
+    POST /api/login                  {"username","password","remember"} → session cookie
+    POST /api/logout                 clear the session cookie
+    GET  /api/session                {"authenticated","auth_required","user"}
+
+Authentication (when `config.control.http.auth=true`): the dashboard logs
+in through /login and holds a signed session cookie (see sessions.py);
+scripts and the CLI keep using HTTP Basic. Everything except /healthz, the
+login page and its assets requires one or the other — image proxying too,
+it would be silly to gate the controls but leak the gallery. HTML pages
+redirect to /login; the dashboard's API calls (marked with the
+`X-Immframe-Client` header) get a plain 401 so the browser never shows its
+Basic-auth popup; other clients get the usual `WWW-Authenticate` challenge.
 """
 from __future__ import annotations
 
 import base64
 import ipaddress
+import time
+from http.cookies import CookieError, SimpleCookie
+from urllib.parse import parse_qs, urlsplit
 import json
 import logging
 import re
@@ -60,6 +78,7 @@ from ..collage import is_collage_id
 from ..config import SELECTION_MODES, Config, HttpConfig
 from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
+from ..sessions import COOKIE_NAME, SessionManager, clear_cookie_header, cookie_header
 
 if TYPE_CHECKING:
     from ..controller import Controller
@@ -71,6 +90,7 @@ log = logging.getLogger(__name__)
 # NO dots — kills path traversal at the regex.
 _ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _IMAGE_PATH_RE = re.compile(r"^/api/image/([A-Za-z0-9_-]{8,128})$")
+_THUMB_PATH_RE = re.compile(r"^/api/thumb/([A-Za-z0-9_-]{8,128})$")
 
 _SELECTION_MODES = SELECTION_MODES
 _COLLAGE_LAYOUTS = ("auto", "grid", "golden_ratio")
@@ -85,6 +105,10 @@ _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 _STATIC: dict[str, tuple[str, str]] = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/config": ("config.html", "text/html; charset=utf-8"),
+    "/login": ("login.html", "text/html; charset=utf-8"),
+    "/static/login.js": ("login.js", "application/javascript; charset=utf-8"),
+    "/static/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/favicon.ico": ("icon.svg", "image/svg+xml"),
     "/static/app.css": ("app.css", "text/css; charset=utf-8"),
     "/static/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/static/config.js": ("config.js", "application/javascript; charset=utf-8"),
@@ -94,6 +118,16 @@ _STATIC: dict[str, tuple[str, str]] = {
 _FORM_CONTENT_TYPES = frozenset({
     "application/x-www-form-urlencoded", "multipart/form-data", "text/plain",
 })
+
+# Reachable without a session: the login page and what it needs.
+_PUBLIC_GET = frozenset({
+    "/healthz", "/login", "/static/app.css", "/static/login.js", "/static/icon.svg",
+    "/favicon.ico", "/api/session",
+})
+_PUBLIC_POST = frozenset({"/api/login", "/api/logout"})
+# HTML pages: an unauthenticated visit redirects to the login form.
+_PAGES = frozenset({"/", "/config"})
+CLIENT_HEADER = "X-Immframe-Client"
 
 _POST_PATHS = frozenset({
     "/api/paused",
@@ -105,6 +139,11 @@ _POST_PATHS = frozenset({
     "/api/hide",
     "/api/favorite",
     "/api/rotate",
+    "/api/previous",
+    "/api/show",
+    "/api/unhide",
+    "/api/login",
+    "/api/logout",
     "/api/config",
     "/api/restart",
     "/api/brightness",
@@ -223,8 +262,12 @@ class _Server(ThreadingHTTPServer):
         if cfg.auth and cfg.username:
             token = base64.b64encode(f"{cfg.username}:{cfg.password}".encode()).decode()
             self.expected_authz = f"Basic {token}"
+            self.sessions: SessionManager | None = SessionManager(
+                cfg.username, cfg.password, days=getattr(cfg, "session_days", 30),
+            )
         else:
             self.expected_authz = None
+            self.sessions = None
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -233,18 +276,100 @@ class _Handler(BaseHTTPRequestHandler):
         log.debug("http %s — " + format, self.client_address[0], *args)
 
     # ── Auth ────────────────────────────────────────────────────────────
+    def end_headers(self) -> None:
+        # Headers queued during handling (session cookie set / renewed).
+        for name, value in getattr(self, "_extra_headers", []):
+            self.send_header(name, value)
+        self._extra_headers = []
+        super().end_headers()
+
+    def _queue_header(self, name: str, value: str) -> None:
+        if not hasattr(self, "_extra_headers"):
+            self._extra_headers = []
+        self._extra_headers.append((name, value))
+
+    def _session_token(self) -> str | None:
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return None
+        try:
+            jar = SimpleCookie(raw)
+        except CookieError:
+            return None
+        morsel = jar.get(COOKIE_NAME)
+        return morsel.value if morsel is not None else None
+
     def _authed(self) -> bool:
         server: _Server = self.server                      # type: ignore[assignment]
         if not server.auth_required or server.expected_authz is None:
             return True
+        mgr = server.sessions
+        if mgr is not None:
+            session = mgr.verify(self._session_token())
+            if session is not None:
+                if mgr.needs_renewal(session):              # keep "remember me" alive while used
+                    token, max_age = mgr.issue(True)
+                    self._queue_header("Set-Cookie", cookie_header(token, max_age))
+                return True
         got = self.headers.get("Authorization", "")
         return secrets.compare_digest(got, server.expected_authz)
 
-    def _unauthorized(self) -> None:
+    def _unauthorized(self, path: str = "") -> None:
+        if self.command == "GET" and path in _PAGES:
+            # A page visit: send the browser to the login form, then back.
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", "/login" + ("?next=" + path if path != "/" else ""))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.headers.get(CLIENT_HEADER):
+            # The dashboard's own fetches: no challenge header, so no popup.
+            return self._json(HTTPStatus.UNAUTHORIZED, {"error": "login required"})
         self.send_response(HTTPStatus.UNAUTHORIZED)
         self.send_header("WWW-Authenticate", 'Basic realm="immframe"')
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def _client_ip(self) -> str:
+        return str(self.client_address[0])
+
+    def _login(self) -> None:
+        server: _Server = self.server                      # type: ignore[assignment]
+        mgr = server.sessions
+        if mgr is None:
+            return self._json(HTTPStatus.OK, {"authenticated": True, "auth_required": False})
+        ip = self._client_ip()
+        if mgr.locked_out(ip):
+            raise _HttpError(HTTPStatus.TOO_MANY_REQUESTS,
+                             "too many failed logins — try again in a few minutes")
+        body = self._read_json(max_bytes=4096)
+        if not isinstance(body, dict):
+            raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {username, password}")
+        user, pw = body.get("username"), body.get("password")
+        if not isinstance(user, str) or not isinstance(pw, str) or not mgr.check_credentials(user, pw):
+            mgr.record_failure(ip)
+            log.warning("dashboard login failed from %s", ip)
+            time.sleep(0.5)                                 # slow down guessing
+            raise _HttpError(HTTPStatus.UNAUTHORIZED, "wrong username or password")
+        mgr.clear_failures(ip)
+        token, max_age = mgr.issue(bool(body.get("remember", True)))
+        self._queue_header("Set-Cookie", cookie_header(token, max_age))
+        log.info("dashboard login from %s", ip)
+        self._json(HTTPStatus.OK, {"authenticated": True, "user": user})
+
+    def _logout(self) -> None:
+        self._queue_header("Set-Cookie", clear_cookie_header())
+        self._json(HTTPStatus.OK, {"authenticated": False})
+
+    def _session_info(self) -> None:
+        server: _Server = self.server                      # type: ignore[assignment]
+        required = bool(server.auth_required and server.expected_authz is not None)
+        authed = self._authed()
+        user = None
+        if authed and required and server.sessions is not None:
+            s = server.sessions.verify(self._session_token())
+            user = s.user if s is not None else None
+        self._json(HTTPStatus.OK, {"authenticated": authed, "auth_required": required, "user": user})
 
     # ── Response helpers ────────────────────────────────────────────────
     def _json(self, status: int, body: Any) -> None:
@@ -308,10 +433,24 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/healthz":
             return self._healthz()
+        if path == "/api/session":
+            return self._session_info()
+        if path in _PUBLIC_GET and path in _STATIC:
+            if path == "/login" and self._authed():          # already in: go to the app
+                return self._redirect(self._next_target())
+            return self._static(path)
         if not self._authed():
-            return self._unauthorized()
+            return self._unauthorized(path)
         if path in _STATIC:
             return self._static(path)
+        if path == "/api/timeline":
+            return self._timeline()
+        if path == "/api/hidden":
+            return self._json(HTTPStatus.OK, {"hidden": [
+                self._hidden_obj(e) for e in self._ctrl_call("hidden_entries")]})
+        m = _THUMB_PATH_RE.match(path)
+        if m:
+            return self._image(m.group(1), size="thumbnail")
         if path == "/api/version":
             return self._version()
         if path == "/api/state":
@@ -329,8 +468,14 @@ class _Handler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def _dispatch_post(self) -> None:
+        post_path = self.path.split("?", 1)[0]
+        if post_path in _PUBLIC_POST:
+            ctype = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            if ctype in _FORM_CONTENT_TYPES:
+                raise _HttpError(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "send JSON, not a form")
+            return self._login() if post_path == "/api/login" else self._logout()
         if not self._authed():
-            return self._unauthorized()
+            return self._unauthorized(post_path)
         # CSRF guard. Browsers cache Basic credentials, so a page on any
         # origin could otherwise drive the frame with a plain <form POST>
         # (a text/plain form body can be shaped into valid JSON). Forms can
@@ -399,11 +544,46 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             return self._json(HTTPStatus.OK, result)
         if path == "/api/hide":
+            # {"id": "..."} blocks that asset (from the timeline); no body =
+            # the slide on screen.
+            body = self._read_json()
+            target = body.get("id") if isinstance(body, dict) else None
+            if target is not None and (not isinstance(target, str) or not _ASSET_ID_RE.match(target)):
+                raise _HttpError(HTTPStatus.BAD_REQUEST, "id must be an asset UUID")
             try:
-                result = self._ctrl.hide_current()
+                result = self._ctrl.hide_asset(target) if target else self._ctrl.hide_current()
             except ValueError as e:
                 raise _HttpError(HTTPStatus.CONFLICT, str(e))
             return self._json(HTTPStatus.OK, result)
+        if path == "/api/unhide":
+            body = self._read_json()
+            ids = body.get("ids") if isinstance(body, dict) else None
+            if isinstance(body, dict) and isinstance(body.get("id"), str):
+                ids = [body["id"]]
+            if not isinstance(ids, list) or not ids or not all(
+                    isinstance(i, str) and _ASSET_ID_RE.match(i) for i in ids):
+                raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'ids': [asset UUIDs]}")
+            return self._json(HTTPStatus.OK, {"results": self._ctrl.unhide(ids)})
+        if path == "/api/previous":
+            try:
+                self._ctrl.previous()
+            except ValueError as e:
+                raise _HttpError(HTTPStatus.CONFLICT, str(e))
+            except ImmichError as e:
+                raise _HttpError(HTTPStatus.BAD_GATEWAY, str(e))
+            return self._state()
+        if path == "/api/show":
+            body = self._read_json()
+            target = body.get("id") if isinstance(body, dict) else None
+            if not isinstance(target, str) or not _ASSET_ID_RE.match(target):
+                raise _HttpError(HTTPStatus.BAD_REQUEST, "expected {'id': asset UUID}")
+            try:
+                self._ctrl.show_again(target)
+            except ValueError as e:
+                raise _HttpError(HTTPStatus.CONFLICT, str(e))
+            except ImmichError as e:
+                raise _HttpError(HTTPStatus.BAD_GATEWAY, str(e))
+            return self._state()
         if path == "/api/favorite":
             # {"value": bool} sets; no body / {} toggles.
             body = self._read_json()
@@ -480,7 +660,8 @@ class _Handler(BaseHTTPRequestHandler):
         # GET-only paths
         if path in {"/api/version", "/api/state", "/healthz", "/api/current_image"}:
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "GET only")
-        if _IMAGE_PATH_RE.match(path):
+        if _IMAGE_PATH_RE.match(path) or _THUMB_PATH_RE.match(path) or path in (
+                "/api/timeline", "/api/hidden", "/api/session"):
             return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "GET only")
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -508,6 +689,8 @@ class _Handler(BaseHTTPRequestHandler):
             # Collages are synthetic — the UI must load them from
             # /api/current_image, not the Immich image proxy.
             "is_collage": is_collage_id(asset.id),
+            "live": bool(asset.live_photo_video_id),
+            "portrait": asset.is_portrait,
         }
 
     def _state(self) -> None:
@@ -536,6 +719,12 @@ class _Handler(BaseHTTPRequestHandler):
             # Second portrait sharing the slide (viewer.portrait_pairs), or null.
             "pair_asset": self._asset_obj(getattr(c, "pair_asset", None)),
             "hidden_count": getattr(c, "hidden_count", 0),
+            "can_go_back": bool(getattr(c, "can_go_back", False)),
+            "slide_started_at": getattr(c, "slide_started_at", None),
+            "next_change_at": getattr(c, "next_change_at", None),
+            "video_playing": bool(getattr(c, "video_playing", False)),
+            "immich_url": self._immich_url(),
+            "now": time.time(),
         })
 
     # ── Settings (config.yaml editor) ───────────────────────────────────
@@ -641,19 +830,64 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _image(self, asset_id: str) -> None:
+    def _ctrl_call(self, name: str, *args):
+        fn = getattr(self._ctrl, name, None)
+        if fn is None:
+            raise _HttpError(HTTPStatus.NOT_IMPLEMENTED, f"{name} not supported")
+        return fn(*args)
+
+    def _immich_url(self) -> str | None:
+        cfg = getattr(self._ctrl, "config", None)
+        return getattr(getattr(cfg, "immich", None), "url", None)
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _next_target(self) -> str:
+        """Safe post-login destination from ?next= (same-site paths only)."""
+        qs = parse_qs(urlsplit(self.path).query)
+        nxt = (qs.get("next") or ["/"])[0]
+        return nxt if nxt in _PAGES else "/"
+
+    def _timeline(self) -> None:
+        t = self._ctrl_call("timeline")
+        history = []
+        for e in t.get("history", []):
+            obj = self._asset_obj(e["asset"]) or {}
+            obj["shown_at"] = e.get("shown_at")
+            obj["pair"] = self._asset_obj(e.get("pair"))
+            obj["blocked"] = bool(e.get("blocked", False))
+            history.append(obj)
+        self._json(HTTPStatus.OK, {
+            "history": history,
+            "position": t.get("position"),
+            "upcoming": [self._asset_obj(a) for a in t.get("upcoming", [])],
+            "now": time.time(),
+        })
+
+    @staticmethod
+    def _hidden_obj(e: dict) -> dict:
+        return {k: e.get(k) for k in ("id", "file", "kind", "at", "archived", "companions")}
+
+    def _image(self, asset_id: str, size: str = "preview") -> None:
         # Belt and braces — the path regex already enforces this, but double-check.
         if not _ASSET_ID_RE.match(asset_id):
             raise _HttpError(HTTPStatus.BAD_REQUEST, "bad asset id")
         server: _Server = self.server                      # type: ignore[assignment]
         try:
-            with server.immich.stream_preview(asset_id) as r:
+            with server.immich.stream_preview(asset_id, size) as r:
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", r.headers.get("Content-Type", "image/jpeg"))
                 cl = r.headers.get("Content-Length")
                 if cl is not None:
                     self.send_header("Content-Length", cl)
-                self.send_header("Cache-Control", "no-store")
+                # Asset images are immutable per id (rotation changes the id's
+                # bytes, so keep it short); a private cache keeps the
+                # timeline snappy without leaking to shared caches.
+                self.send_header("Cache-Control", "private, max-age=300")
                 self.end_headers()
                 for chunk in r.iter_content(chunk_size=64 * 1024):
                     if chunk:

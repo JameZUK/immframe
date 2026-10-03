@@ -422,7 +422,8 @@ def test_hide_current_adds_to_list_archives_and_advances(tmp_path):
     assert "11111111-2222-3333-4444-555555555555" in c._hidden       # the motion clip too
     c._client.update_asset.assert_called_once_with(c._current_asset.id, visibility="archive")
     assert c._force_next_evt.is_set()
-    assert c.hidden_count == 2
+    assert c.hidden_count == 1                                       # photo + clip = one block
+    assert c.hidden_entries()[0]["companions"] == ["11111111-2222-3333-4444-555555555555"]
 
 
 def test_hide_current_survives_immich_refusal(tmp_path):
@@ -569,7 +570,7 @@ def test_rotate_current_calls_immich_and_reshows_when_preview_changes(tmp_path):
     c._client.rotate_asset.assert_called_once_with(c._current_asset.id, 90)
     # The re-show thread polls; drive it synchronously with tiny timing.
     c._reshow_after_edit(c._current_asset, old, attempts=3, interval_s=0.01)
-    assert c._priority_item[0] == new
+    assert c._priority_item[0][0] == new                     # (item, history index)
     assert c._force_next_evt.is_set()
     assert c._take_item(timeout=0.1)[0] == new                 # served before the queue
     c._prefetch.next.assert_not_called()
@@ -608,3 +609,132 @@ def test_rotate_current_rejects_video_collage_and_nothing():
     with pytest.raises(ValueError, match="video"):
         c.rotate_current()
     c._client.rotate_asset.assert_not_called()
+
+
+
+# ── History, previous, timeline, block by id ──────────────────────────────
+
+
+def _show(c, asset, pair=None, *, replay=None):
+    """Simulate the loop putting a slide up."""
+    c._replay_index = replay
+    c._current_asset = asset
+    c._pair_asset = pair
+    c._record_shown(asset, pair)
+
+
+def test_history_records_slides_and_previous_steps_back(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    a, b, d = _asset("a" * 36), _asset("b" * 36), _asset("d" * 36)
+    for x in (a, b, d):
+        _show(c, x)
+    assert c.can_go_back and c._hist_pos == 2
+    c._prefetch.fetch_now.side_effect = lambda asset: (tmp_path / f"{asset.id}.jpg", asset, None)
+    out = c.previous()
+    assert out == {"id": b.id, "index": 1}
+    item, idx = c._priority_item
+    assert item[1].id == b.id and idx == 1 and c._force_next_evt.is_set()
+    # The loop shows the replay: history doesn't grow, the cursor moves back.
+    assert c._take_item(timeout=0.1)[1].id == b.id and c._replay_index == 1
+    _show(c, b, replay=1)
+    assert len(c._history) == 3 and c._hist_pos == 1
+    c.previous()
+    assert c._priority_item[0][1].id == a.id
+    _show(c, a, replay=0)
+    assert not c.can_go_back
+    with pytest.raises(ValueError, match="nothing earlier"):
+        c.previous()
+
+
+def test_previous_skips_collages_and_refuses_blocked(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    a, col, b = _asset("a" * 36), _asset("collage-5"), _asset("b" * 36)
+    for x in (a, col, b):
+        _show(c, x)
+    c._prefetch.fetch_now.side_effect = lambda asset: (tmp_path / "x.jpg", asset, None)
+    assert c.previous()["id"] == a.id                              # collage skipped
+    c._priority_item = None
+    c._hidden.add(a.id)
+    with pytest.raises(ValueError, match="blocked"):
+        c.show_again(a.id)
+    with pytest.raises(ValueError, match="collage"):
+        c.show_again("collage-5")
+    with pytest.raises(ValueError, match="no longer"):
+        c.show_again("z" * 36)
+
+
+def test_history_is_bounded(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    for i in range(c.HISTORY_MAX + 15):
+        _show(c, _asset(f"{i:036d}"))
+    assert len(c._history) == c.HISTORY_MAX and c._hist_pos == c.HISTORY_MAX - 1
+
+
+def test_new_slide_after_going_back_appends_and_jumps_to_end(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    a, b = _asset("a" * 36), _asset("b" * 36)
+    _show(c, a); _show(c, b)
+    _show(c, a, replay=0)
+    assert c._hist_pos == 0
+    _show(c, _asset("n" * 36))                                     # next normal slide
+    assert len(c._history) == 3 and c._hist_pos == 2
+    assert c._history[-1]["asset"].id == "n" * 36
+
+
+def test_timeline_reports_history_position_and_upcoming_minus_blocked(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    _show(c, _asset("a" * 36)); _show(c, _asset("b" * 36))
+    up1, up2 = _asset("u" * 36), _asset("v" * 36)
+    c._prefetch.peek.return_value = [up1, up2]
+    c._hidden.add(up2.id)
+    t = c.timeline()
+    assert [e["asset"].id for e in t["history"]] == ["a" * 36, "b" * 36]
+    assert t["position"] == 1
+    assert [a.id for a in t["upcoming"]] == [up1.id]
+
+
+def test_take_item_drops_assets_blocked_after_queueing(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    p1 = tmp_path / "blocked.jpg"; p1.write_bytes(b"x")
+    blocked, ok = (p1, _asset("x" * 36), None), (tmp_path / "ok.jpg", _asset("y" * 36), None)
+    c._hidden.add("x" * 36)
+    c._prefetch.next.side_effect = [blocked, ok]
+    assert c._take_item(timeout=0.1)[1].id == "y" * 36
+    assert not p1.exists()                                         # cache file cleaned up
+
+
+def test_hide_asset_by_id_from_history_keeps_slide(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    old = _asset("o" * 36, live="c" * 36)
+    _show(c, old); _show(c, _asset("n" * 36))
+    c._force_next_evt.clear()
+    out = c.hide_asset(old.id)
+    assert out["hidden"] == old.id and out["archived"] is True
+    assert old.id in c._hidden and "c" * 36 in c._hidden            # companion from history
+    assert c.hidden_entries()[0]["file"] == "x.jpg"
+    assert not c._force_next_evt.is_set()                          # not on screen → no skip
+    with pytest.raises(ValueError):
+        c.hide_asset("collage-1")
+
+
+def test_unhide_unarchives_only_what_we_archived(tmp_path):
+    from immframe.immich.client import ImmichError
+    c = _controller_with_hidden(tmp_path)
+    c.hide_asset("a" * 36)                                         # archived (mock accepts)
+    c._client.update_asset.side_effect = ImmichError("403")
+    c.hide_asset("b" * 36)                                         # archive refused
+    c._client.update_asset.reset_mock(); c._client.update_asset.side_effect = None
+    res = c.unhide(["a" * 36, "b" * 36, "z" * 36])
+    assert [r["unhidden"] for r in res] == [True, True, False]
+    c._client.update_asset.assert_called_once_with("a" * 36, visibility="timeline")
+    assert c.hidden_count == 0
+
+
+def test_unhide_reports_unarchive_failure_but_still_unblocks(tmp_path):
+    from immframe.immich.client import ImmichError
+    c = _controller_with_hidden(tmp_path)
+    c.hide_asset("a" * 36)
+    c._client.update_asset.side_effect = ImmichError("boom")
+    res = c.unhide(["a" * 36])
+    assert res[0]["unhidden"] is True and "un-archiving" in res[0]["error"]
+    assert "a" * 36 not in c._hidden

@@ -13,6 +13,18 @@
 
 const $ = id => document.getElementById(id);
 
+// Session-cookie fetch: the marker header makes an expired session answer
+// a plain 401 (no Basic-auth popup), which sends us to the login page.
+async function authFetch(url, opts = {}) {
+  const headers = Object.assign({ "X-Immframe-Client": "web" }, opts.headers || {});
+  const r = await fetch(url, Object.assign({}, opts, { headers }));
+  if (r.status === 401) {
+    location.href = "/login?next=/config";
+    throw new Error("login required");
+  }
+  return r;
+}
+
 let META = null;          // /api/config payload (schema, options, mask …)
 let TREE = {};            // config tree as loaded (masked)
 let PLAYLIST = [];        // working copy of selection.playlist
@@ -265,7 +277,9 @@ function msg(kind, text) {
 }
 
 function setConnection(status, text) {
-  const node = $("connection"); node.dataset.status = status; node.textContent = text;
+  const node = $("connection");
+  node.dataset.status = status;
+  $("connection-text").textContent = text === "live" ? "Connected" : text === "restarting" ? "Restarting…" : text === "offline" ? "Offline" : text;
 }
 
 async function save(restart) {
@@ -274,7 +288,7 @@ async function save(restart) {
   $("btn-save").disabled = $("btn-save-restart").disabled = true;
   msg("info", restart ? "Saving and restarting…" : "Saving…");
   try {
-    const r = await fetch("/api/config", {
+    const r = await authFetch("/api/config", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => null);
@@ -301,7 +315,7 @@ async function waitForRestart() {
   while (Date.now() - started < 60000) {
     await new Promise(r => setTimeout(r, 1500));
     try {
-      const r = await fetch("/api/version", { cache: "no-store" });
+      const r = await authFetch("/api/version", { cache: "no-store" });
       if (r.ok && (sawDown || Date.now() - started > 20000)) {
         setConnection("ok", "live");
         msg("ok", "Restarted with the new configuration.");
@@ -317,7 +331,7 @@ async function waitForRestart() {
 // ── Load ─────────────────────────────────────────────────────────────────
 
 async function load() {
-  const r = await fetch("/api/config", { cache: "no-store" });
+  const r = await authFetch("/api/config", { cache: "no-store" });
   if (!r.ok) throw new Error(`GET /api/config -> ${r.status}`);
   META = await r.json();
   TREE = META.config || {};

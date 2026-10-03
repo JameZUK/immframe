@@ -4,145 +4,237 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b0d12">
   <title>immframe</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 </head>
-<body>
-  <header class="app-header">
-    <h1>immframe</h1>
-    <a href="/config" class="settings-link">Settings ⚙</a>
-    <span id="connection" class="badge" data-status="loading">…</span>
+<body data-view="now" data-panel="timeline">
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-frame" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M19 20L9 12l10-8z"/><path d="M5 19V5"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></symbol>
+    <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.7-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+    <symbol id="i-live" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5" stroke-dasharray="2.2 2.6"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="i-replay" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="immframe home">
+      <svg class="ic brand-ic"><use href="#i-frame"/></svg>
+      <span>immframe</span>
+    </a>
+    <span id="status" class="status" data-status="loading"><span class="dot"></span><span id="status-text">Connecting…</span></span>
+    <nav class="topnav" aria-label="Sections">
+      <button type="button" class="topnav-btn" data-go="timeline">Timeline</button>
+      <button type="button" class="topnav-btn" data-go="blocked">Blocked <span class="count" id="blocked-count-top" hidden></span></button>
+      <button type="button" class="topnav-btn" data-go="controls">Controls</button>
+    </nav>
+    <div class="topbar-actions">
+      <a class="icon-btn" href="/config" title="Settings" aria-label="Settings"><svg class="ic"><use href="#i-settings"/></svg></a>
+      <button type="button" class="icon-btn" id="btn-logout" title="Log out" aria-label="Log out" hidden><svg class="ic"><use href="#i-logout"/></svg></button>
+    </div>
   </header>
 
-  <main class="app">
-    <section class="card current">
-      <div class="image-wrap">
-        <img id="current-image" alt="" loading="lazy">
-        <div id="image-placeholder" class="image-placeholder">no asset yet</div>
+  <main class="layout">
+    <!-- ── Now showing ──────────────────────────────────────────────── -->
+    <section class="view" id="view-now" aria-label="Now showing">
+      <div class="stage" id="stage" data-empty="true">
+        <img class="stage-backdrop" id="stage-backdrop" alt="">
+        <div class="stage-images" id="stage-images">
+          <img class="stage-img" id="stage-img" alt="Photo on the frame">
+          <img class="stage-img" id="stage-img-pair" alt="Second photo of the pair" hidden>
+        </div>
+        <div class="stage-empty" id="stage-empty">
+          <svg class="ic"><use href="#i-frame"/></svg>
+          <span>Waiting for the first photo…</span>
+        </div>
+        <div class="stage-badges" id="stage-badges"></div>
+        <div class="stage-fav" id="stage-fav" hidden><svg class="ic fill"><use href="#i-heart"/></svg></div>
+        <div class="stage-paused" id="stage-paused" hidden><svg class="ic fill"><use href="#i-pause"/></svg><span>Paused</span></div>
+        <div class="stage-caption">
+          <div class="stage-title" id="stage-title">—</div>
+          <div class="stage-sub" id="stage-sub"></div>
+        </div>
+        <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
       </div>
-      <dl class="meta">
-        <dt>File</dt><dd id="meta-file">—</dd>
-        <dt>Taken</dt><dd id="meta-date">—</dd>
-        <dt>Where</dt><dd id="meta-where">—</dd>
-        <dt>Camera</dt><dd id="meta-camera">—</dd>
-        <dt>Kind</dt><dd id="meta-kind">—</dd>
-        <dt>Paired</dt><dd id="meta-pair">—</dd>
-      </dl>
-    </section>
 
-    <section class="card transport">
-      <button id="btn-pause" type="button">Pause</button>
-      <button id="btn-next" type="button">Next ▶</button>
-    </section>
+      <div class="transport">
+        <button type="button" class="round" id="btn-prev" title="Previous (←)" aria-label="Previous"><svg class="ic fill"><use href="#i-prev"/></svg></button>
+        <button type="button" class="round primary" id="btn-pause" title="Pause (space)" aria-label="Pause"><svg class="ic fill"><use id="pause-icon" href="#i-pause"/></svg></button>
+        <button type="button" class="round" id="btn-next" title="Next (→)" aria-label="Next"><svg class="ic fill"><use href="#i-next"/></svg></button>
+      </div>
+      <div class="next-in" id="next-in">&nbsp;</div>
 
-    <section class="card transport curate">
-      <button id="btn-favorite" type="button" title="Star / unstar this photo in Immich">♥ Favourite</button>
-      <button id="btn-rotate" type="button" title="Rotate this photo 90° clockwise in Immich (non-destructive)">↻ Rotate</button>
-      <button id="btn-hide" type="button" class="danger" title="Never show this photo on the frame again (and archive it in Immich)">Never show again</button>
-    </section>
-    <div id="curate-msg" class="curate-msg" hidden></div>
+      <div class="actions">
+        <button type="button" class="action" id="btn-favorite" title="Favourite in Immich (F)"><svg class="ic"><use href="#i-heart"/></svg><span id="fav-label">Favourite</span></button>
+        <button type="button" class="action" id="btn-rotate" title="Rotate 90° in Immich (R)"><svg class="ic"><use href="#i-rotate"/></svg><span>Rotate</span></button>
+        <button type="button" class="action danger" id="btn-hide" title="Never show this photo again"><svg class="ic"><use href="#i-ban"/></svg><span>Block</span></button>
+        <a class="action" id="btn-open" target="_blank" rel="noopener" title="Open in Immich"><svg class="ic"><use href="#i-external"/></svg><span>Immich</span></a>
+      </div>
 
-    <section class="card selection">
-      <h2>Selection</h2>
-      <div class="row">
-        <label>Mode</label>
-        <select id="mode">
-          <option value="random">Random</option>
-          <option value="favorites">Favourites</option>
-          <option value="album">Album</option>
-          <option value="smart">Smart</option>
-          <option value="scene">Scene</option>
-          <option value="people">People</option>
-          <option value="memory">On this day</option>
-          <option value="recent">Recent uploads</option>
-          <option value="playlist">Playlist (config)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>Albums</label>
-        <input id="album-ids" type="text" placeholder="uuid-1, uuid-2" autocomplete="off">
-      </div>
-      <div class="row">
-        <label>Query</label>
-        <input id="smart-query" type="text" placeholder="family at the beach" autocomplete="off">
-      </div>
-      <div class="row">
-        <label>People</label>
-        <input id="people-ids" type="text" placeholder="empty = rotate all named" autocomplete="off">
-      </div>
-      <div class="row" id="scene-row" hidden>
-        <label>Now showing</label>
-        <span id="current-scene" class="num">—</span>
+      <div class="card details">
+        <div class="mode-line"><span class="chip" id="mode-chip">—</span><span class="scene" id="scene-label"></span></div>
+        <dl class="meta">
+          <div><dt><svg class="ic"><use href="#i-calendar"/></svg></dt><dd id="meta-date">—</dd></div>
+          <div><dt><svg class="ic"><use href="#i-pin"/></svg></dt><dd id="meta-where">—</dd></div>
+          <div><dt><svg class="ic"><use href="#i-camera"/></svg></dt><dd id="meta-camera">—</dd></div>
+          <div><dt><svg class="ic"><use href="#i-file"/></svg></dt><dd id="meta-file">—</dd></div>
+        </dl>
       </div>
     </section>
 
-    <section class="card slideshow">
-      <h2>Slideshow</h2>
-      <div class="row">
-        <label>Slide duration <span id="time-delay-value" class="num">60s</span></label>
-        <input id="time-delay" type="range" min="1" max="600" step="1">
+    <!-- ── Timeline ─────────────────────────────────────────────────── -->
+    <section class="view panel" id="view-timeline" aria-label="Timeline">
+      <div class="panel-head">
+        <h2>Up next</h2>
+        <span class="muted" id="upnext-note"></span>
       </div>
-      <div class="row">
-        <label>Fade duration <span id="fade-time-value" class="num">4s</span></label>
-        <input id="fade-time" type="range" min="0" max="30" step="0.5">
+      <div class="strip" id="upcoming"></div>
+
+      <div class="panel-head">
+        <h2>Recently shown</h2>
+        <span class="muted">Tap a photo to show it again or block it</span>
       </div>
-      <div class="row">
-        <label>Brightness <span id="brightness-value" class="num">1.00</span></label>
-        <input id="brightness" type="range" min="0" max="1" step="0.05">
-      </div>
+      <div class="tiles" id="history"></div>
     </section>
 
-    <section class="card collage">
-      <h2>Collage</h2>
-      <div class="row toggle">
-        <label for="collage-enabled">Collage mode</label>
-        <input id="collage-enabled" type="checkbox">
+    <!-- ── Blocked ──────────────────────────────────────────────────── -->
+    <section class="view panel" id="view-blocked" aria-label="Blocked photos">
+      <div class="panel-head">
+        <h2>Blocked <span class="count" id="blocked-count"></span></h2>
+        <label class="search"><svg class="ic"><use href="#i-search"/></svg><input type="search" id="blocked-filter" placeholder="Filter by file name"></label>
       </div>
-      <div class="row">
-        <label>Layout</label>
-        <select id="collage-layout">
-          <option value="auto">Auto</option>
-          <option value="grid">Grid</option>
-          <option value="golden_ratio">Golden ratio</option>
-        </select>
+      <p class="muted lead">Photos you blocked never come up on the frame. Unblocking also puts them back on the Immich timeline if the frame archived them.</p>
+      <div class="bulkbar" id="bulkbar" hidden>
+        <span id="bulk-count">0 selected</span>
+        <button type="button" class="btn ghost" id="bulk-clear">Clear</button>
+        <button type="button" class="btn primary" id="bulk-unblock"><svg class="ic"><use href="#i-undo"/></svg>Unblock selected</button>
       </div>
-      <div class="row">
-        <label>Min tiles <span id="collage-min-tiles-value" class="num">3</span></label>
-        <input id="collage-min-tiles" type="range" min="2" max="12" step="1">
-      </div>
-      <div class="row">
-        <label>Max tiles <span id="collage-max-tiles-value" class="num">6</span></label>
-        <input id="collage-max-tiles" type="range" min="2" max="12" step="1">
-      </div>
+      <div class="tiles blocked-tiles" id="blocked"></div>
     </section>
 
-    <section class="card display">
-      <h2>Display</h2>
-      <div class="row toggle">
-        <label for="display-is-on">Display on</label>
-        <input id="display-is-on" type="checkbox">
+    <!-- ── Controls ─────────────────────────────────────────────────── -->
+    <section class="view panel" id="view-controls" aria-label="Controls">
+      <div class="card">
+        <h3>Slideshow</h3>
+        <label class="field">
+          <span>What to show</span>
+          <select id="mode">
+            <option value="playlist">Playlist (a mix of everything)</option>
+            <option value="random">Random</option>
+            <option value="favorites">Favourites</option>
+            <option value="scene">Scenes (a place or theme)</option>
+            <option value="people">People (one at a time)</option>
+            <option value="memory">On this day</option>
+            <option value="recent">Recent uploads</option>
+            <option value="album">Albums</option>
+            <option value="smart">Smart search</option>
+          </select>
+        </label>
+        <label class="field" data-for-mode="album"><span>Album IDs</span><input type="text" id="album-ids" placeholder="uuid, uuid"></label>
+        <label class="field" data-for-mode="smart"><span>Search for</span><input type="text" id="smart-query" placeholder="e.g. sunset at the beach"></label>
+        <label class="field" data-for-mode="people"><span>People IDs <em>(empty = everyone named)</em></span><input type="text" id="people-ids" placeholder="uuid, uuid"></label>
+        <label class="slider">
+          <span>Each photo for <b id="time-delay-value">—</b></span>
+          <input type="range" id="time-delay" min="5" max="300" step="5">
+        </label>
+        <label class="slider">
+          <span>Crossfade <b id="fade-time-value">—</b></span>
+          <input type="range" id="fade-time" min="0" max="10" step="0.5">
+        </label>
       </div>
-      <div class="row toggle">
-        <label for="show-clock">Clock overlay</label>
-        <input id="show-clock" type="checkbox">
-      </div>
-      <fieldset class="show-text">
-        <legend>Overlay fields</legend>
-        <label><input type="checkbox" data-st-key="caption"> Caption</label>
-        <label><input type="checkbox" data-st-key="name"> Name</label>
-        <label><input type="checkbox" data-st-key="date"> Date</label>
-        <label><input type="checkbox" data-st-key="location"> Location</label>
-        <label><input type="checkbox" data-st-key="people"> People</label>
-        <label><input type="checkbox" data-st-key="tags"> Tags</label>
-        <label><input type="checkbox" data-st-key="ocr"> OCR text</label>
-      </fieldset>
-    </section>
 
-    <footer class="footer">
-      <span>v<span id="version">…</span></span>
-    </footer>
+      <div class="card">
+        <h3>Display</h3>
+        <label class="switch"><span><svg class="ic"><use href="#i-monitor"/></svg>Screen on</span><input type="checkbox" id="display-is-on"><i></i></label>
+        <label class="switch"><span><svg class="ic"><use href="#i-clock"/></svg>Clock</span><input type="checkbox" id="show-clock"><i></i></label>
+        <label class="slider">
+          <span><svg class="ic"><use href="#i-sun"/></svg>Brightness <b id="brightness-value">—</b></span>
+          <input type="range" id="brightness" min="0" max="1" step="0.05">
+        </label>
+        <div class="field">
+          <span>Caption shows</span>
+          <div class="chips" id="show-text">
+            <button type="button" class="chip-toggle" data-key="caption">Caption</button>
+            <button type="button" class="chip-toggle" data-key="date">Date</button>
+            <button type="button" class="chip-toggle" data-key="location">Location</button>
+            <button type="button" class="chip-toggle" data-key="people">People</button>
+            <button type="button" class="chip-toggle" data-key="name">File name</button>
+            <button type="button" class="chip-toggle" data-key="tags">Tags</button>
+            <button type="button" class="chip-toggle" data-key="ocr">Text in photo</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Collages</h3>
+        <label class="switch"><span><svg class="ic"><use href="#i-grid"/></svg>Make every slide a collage</span><input type="checkbox" id="collage-enabled"><i></i></label>
+        <div class="field">
+          <span>Layout</span>
+          <div class="segmented" id="collage-layout">
+            <button type="button" data-value="auto">Auto</button>
+            <button type="button" data-value="grid">Grid</button>
+            <button type="button" data-value="golden_ratio">Golden ratio</button>
+          </div>
+        </div>
+        <label class="slider"><span>Fewest photos <b id="collage-min-value">—</b></span><input type="range" id="collage-min" min="2" max="12" step="1"></label>
+        <label class="slider"><span>Most photos <b id="collage-max-value">—</b></span><input type="range" id="collage-max" min="2" max="12" step="1"></label>
+        <p class="muted small">Playlist entries marked as collages work even with this off.</p>
+      </div>
+
+      <a class="card linkcard" href="/config">
+        <svg class="ic"><use href="#i-settings"/></svg>
+        <div><b>All settings</b><span class="muted">Playlist, Immich connection, video, Home Assistant…</span></div>
+      </a>
+    </section>
   </main>
 
-  <script src="/static/app.js" defer></script>
+  <nav class="tabbar" aria-label="Sections">
+    <button type="button" data-go="now"><svg class="ic"><use href="#i-image"/></svg><span>Now</span></button>
+    <button type="button" data-go="timeline"><svg class="ic"><use href="#i-history"/></svg><span>Timeline</span></button>
+    <button type="button" data-go="blocked"><svg class="ic"><use href="#i-ban"/></svg><span>Blocked</span><span class="count" id="blocked-count-tab" hidden></span></button>
+    <button type="button" data-go="controls"><svg class="ic"><use href="#i-sliders"/></svg><span>Controls</span></button>
+  </nav>
+
+  <!-- Photo detail sheet (timeline / blocked items) -->
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+    <button type="button" class="icon-btn sheet-close" id="sheet-close" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    <div class="sheet-img"><img id="sheet-img" alt=""></div>
+    <div class="sheet-body">
+      <div class="sheet-title" id="sheet-title">—</div>
+      <div class="muted" id="sheet-sub"></div>
+      <div class="sheet-actions" id="sheet-actions"></div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>

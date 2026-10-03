@@ -56,6 +56,40 @@ class _StubController:
     favorite_calls: list = []
 
     config = None                     # set by tests that exercise /api/config
+    can_go_back = True
+    previous_calls = 0
+    previous_result: Exception | None = None
+    shown_again: list = []
+    hidden_by_id: list = []
+    unhidden: list = []
+    timeline_data: dict = {"history": [], "position": None, "upcoming": []}
+    blocked: list = []
+
+    def previous(self):
+        self.previous_calls += 1
+        if self.previous_result is not None:
+            raise self.previous_result
+        return {"id": "x", "index": 0}
+
+    def show_again(self, asset_id):
+        self.shown_again.append(asset_id)
+        if asset_id.startswith("bad"):
+            raise ValueError("that photo is no longer in the history")
+        return {"id": asset_id, "index": 0}
+
+    def hide_asset(self, asset_id):
+        self.hidden_by_id.append(asset_id)
+        return {"hidden": asset_id, "archived": False, "error": "403"}
+
+    def unhide(self, ids):
+        self.unhidden.extend(ids)
+        return [{"id": i, "unhidden": True, "error": None} for i in ids]
+
+    def timeline(self):
+        return self.timeline_data
+
+    def hidden_entries(self):
+        return self.blocked
     restart_calls = 0
 
     def request_restart(self):
@@ -597,7 +631,7 @@ def test_method_mismatch_returns_405():
 def _setup_stream_mock(client_mock, body: bytes, status: int = 200, content_type: str = "image/jpeg"):
     """Make client.stream_preview yield a fake streaming Response."""
     @contextmanager
-    def fake_stream(asset_id: str) -> Iterator[MagicMock]:
+    def fake_stream(asset_id: str, size: str | None = None) -> Iterator[MagicMock]:
         if status >= 400:
             from immframe.immich.client import ImmichError
             raise ImmichError(f"thumbnail {asset_id}: {status}")
@@ -774,9 +808,13 @@ def test_static_js_served():
 
 
 def test_static_requires_auth():
+    """Pages redirect to the login form; assets/API answer 401."""
     with _server() as (base, _, _):
-        r = requests.get(f"{base}/", timeout=2.0)
-        assert r.status_code == 401
+        r = requests.get(f"{base}/", timeout=2.0, allow_redirects=False)
+        assert r.status_code == 302 and r.headers["Location"] == "/login"
+        r = requests.get(f"{base}/config", timeout=2.0, allow_redirects=False)
+        assert r.status_code == 302 and r.headers["Location"] == "/login?next=/config"
+        assert requests.get(f"{base}/static/app.js", timeout=2.0).status_code == 401
 
 
 def test_static_only_whitelisted_paths_served():
@@ -1001,3 +1039,170 @@ def test_post_rotate_errors():
         r = requests.post(f"{base}/api/rotate", timeout=2.0, auth=_auth())
         assert r.status_code == 502 and "asset.edit" in r.json()["error"]
         assert requests.post(f"{base}/api/rotate", timeout=2.0).status_code == 401
+
+
+
+# ── Login / sessions ──────────────────────────────────────────────────────
+
+
+WEB = {"X-Immframe-Client": "web"}
+
+
+def _login(base, password="hunter2", remember=True):
+    return requests.post(f"{base}/api/login", json={"username": "admin", "password": password, "remember": remember}, timeout=5.0)
+
+
+def test_login_sets_persistent_httponly_cookie_and_cookie_authenticates():
+    with _server() as (base, _, _):
+        r = _login(base)
+        assert r.status_code == 200 and r.json()["authenticated"] is True
+        sc = r.headers["Set-Cookie"]
+        assert "immframe_session=" in sc and "HttpOnly" in sc and "SameSite=Lax" in sc and "Max-Age=" in sc
+        sess = requests.Session()
+        sess.cookies.update(r.cookies)
+        assert sess.get(f"{base}/api/state", timeout=2.0).status_code == 200
+        assert sess.get(f"{base}/", timeout=2.0, allow_redirects=False).status_code == 200
+        info = sess.get(f"{base}/api/session", timeout=2.0).json()
+        assert info == {"authenticated": True, "auth_required": True, "user": "admin"}
+
+
+def test_login_without_remember_is_a_browser_session_cookie():
+    with _server() as (base, _, _):
+        r = _login(base, remember=False)
+        assert r.status_code == 200 and "Max-Age" not in r.headers["Set-Cookie"]
+
+
+def test_bad_login_and_lockout():
+    from immframe.sessions import MAX_FAILURES
+    with _server() as (base, _, _):
+        r = _login(base, password="nope")
+        assert r.status_code == 401 and "wrong" in r.json()["error"]
+        assert "WWW-Authenticate" not in r.headers and "Set-Cookie" not in r.headers
+        for _ in range(MAX_FAILURES - 1):
+            _login(base, password="nope")
+        r = _login(base)                                               # even the right password
+        assert r.status_code == 429
+
+
+def test_forged_cookie_rejected_and_api_401_without_popup_for_dashboard():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/api/state", headers={**WEB, "Cookie": "immframe_session=v1.x.9999999999.1.forged"}, timeout=2.0)
+        assert r.status_code == 401 and "WWW-Authenticate" not in r.headers
+        assert r.json()["error"] == "login required"
+        r = requests.get(f"{base}/api/state", timeout=2.0)            # plain client: Basic challenge
+        assert r.status_code == 401 and r.headers["WWW-Authenticate"].startswith("Basic")
+
+
+def test_basic_auth_still_works_for_scripts():
+    with _server() as (base, _, _):
+        assert requests.get(f"{base}/api/state", auth=_auth(), timeout=2.0).status_code == 200
+
+
+def test_logout_clears_cookie():
+    with _server() as (base, _, _):
+        r = requests.post(f"{base}/api/logout", json={}, timeout=2.0)
+        assert r.status_code == 200 and "Max-Age=0" in r.headers["Set-Cookie"]
+
+
+def test_login_page_public_and_redirects_when_signed_in():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/login", timeout=2.0)
+        assert r.status_code == 200 and "Sign in" in r.text
+        assert requests.get(f"{base}/static/login.js", timeout=2.0).status_code == 200
+        assert requests.get(f"{base}/static/app.css", timeout=2.0).status_code == 200
+        sess = requests.Session(); sess.cookies.update(_login(base).cookies)
+        r = sess.get(f"{base}/login?next=/config", timeout=2.0, allow_redirects=False)
+        assert r.status_code == 302 and r.headers["Location"] == "/config"
+        r = sess.get(f"{base}/login?next=//evil.example", timeout=2.0, allow_redirects=False)
+        assert r.headers["Location"] == "/"                            # no open redirect
+
+
+def test_login_rejects_form_posts():
+    with _server() as (base, _, _):
+        r = requests.post(f"{base}/api/login", data="username=admin&password=hunter2",
+                          headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=2.0)
+        assert r.status_code == 415
+
+
+def test_session_info_when_auth_disabled():
+    with _server(auth=False) as (base, _, _):
+        assert requests.get(f"{base}/api/session", timeout=2.0).json()["auth_required"] is False
+        r = requests.post(f"{base}/api/login", json={}, timeout=2.0)
+        assert r.status_code == 200
+
+
+def test_old_cookie_renewed_past_half_life(monkeypatch):
+    import time as _time
+    from immframe import sessions as sm
+    with _server() as (base, _, _):
+        token = _login(base).cookies["immframe_session"]
+        real = _time.time
+        monkeypatch.setattr(sm.time, "time", lambda: real() + 20 * 86400)   # past half of 30 days
+        r = requests.get(f"{base}/api/state", headers={"Cookie": f"immframe_session={token}"}, timeout=2.0)
+        assert r.status_code == 200 and "immframe_session=" in r.headers.get("Set-Cookie", "")
+
+
+# ── Timeline / previous / block list ──────────────────────────────────────
+
+
+def test_previous_and_show_again():
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/previous", timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and r.json()["can_go_back"] is True and ctrl.previous_calls == 1
+        ctrl.previous_result = ValueError("nothing earlier to go back to")
+        assert requests.post(f"{base}/api/previous", timeout=2.0, auth=_auth()).status_code == 409
+        uid = "11111111-2222-3333-4444-555555555555"
+        assert requests.post(f"{base}/api/show", json={"id": uid}, timeout=2.0, auth=_auth()).status_code == 200
+        assert ctrl.shown_again == [uid]
+        r = requests.post(f"{base}/api/show", json={"id": "bad-1111-2222-3333"}, timeout=2.0, auth=_auth())
+        assert r.status_code == 409
+        assert requests.post(f"{base}/api/show", json={"id": "../x"}, timeout=2.0, auth=_auth()).status_code == 400
+
+
+def test_timeline_serialises_history_and_upcoming():
+    with _server() as (base, ctrl, _):
+        a = _asset()
+        ctrl.timeline_data = {"history": [{"asset": a, "pair": None, "shown_at": 123.0}], "position": 0, "upcoming": [a]}
+        body = requests.get(f"{base}/api/timeline", timeout=2.0, auth=_auth()).json()
+        assert body["position"] == 0 and body["history"][0]["shown_at"] == 123.0
+        assert body["history"][0]["id"] == a.id and body["history"][0]["pair"] is None
+        assert body["upcoming"][0]["file"] == "IMG_0001.jpg" and "now" in body
+
+
+def test_hide_by_id_hidden_list_and_unhide():
+    uid = "11111111-2222-3333-4444-555555555555"
+    with _server() as (base, ctrl, _):
+        r = requests.post(f"{base}/api/hide", json={"id": uid}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and ctrl.hidden_by_id == [uid]
+        assert requests.post(f"{base}/api/hide", json={"id": "a/b"}, timeout=2.0, auth=_auth()).status_code == 400
+        ctrl.blocked = [{"id": uid, "file": "x.jpg", "kind": "IMAGE", "at": 1.0, "archived": True, "companions": []}]
+        body = requests.get(f"{base}/api/hidden", timeout=2.0, auth=_auth()).json()
+        assert body["hidden"][0]["file"] == "x.jpg"
+        r = requests.post(f"{base}/api/unhide", json={"ids": [uid]}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and r.json()["results"][0]["unhidden"] and ctrl.unhidden == [uid]
+        assert requests.post(f"{base}/api/unhide", json={"ids": []}, timeout=2.0, auth=_auth()).status_code == 400
+        assert requests.post(f"{base}/api/unhide", json={"ids": ["../x"]}, timeout=2.0, auth=_auth()).status_code == 400
+
+
+def test_thumb_proxy_requests_thumbnail_size():
+    from contextlib import contextmanager
+    with _server() as (base, _, client):
+        seen = {}
+
+        @contextmanager
+        def fake(asset_id, size=None):
+            seen["size"] = size
+            r = MagicMock(); r.headers = {"Content-Type": "image/webp"}; r.iter_content.return_value = [b"W"]
+            yield r
+        client.stream_preview.side_effect = fake
+        r = requests.get(f"{base}/api/thumb/11111111-2222-3333-4444-555555555555", timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and r.content == b"W" and seen["size"] == "thumbnail"
+        assert "max-age" in r.headers["Cache-Control"]
+
+
+def test_new_endpoints_require_auth():
+    with _server() as (base, _, _):
+        for path in ("/api/timeline", "/api/hidden", "/api/thumb/11111111-2222-3333-4444-555555555555"):
+            assert requests.get(f"{base}{path}", timeout=2.0).status_code == 401, path
+        for path in ("/api/previous", "/api/show", "/api/unhide"):
+            assert requests.post(f"{base}{path}", json={}, timeout=2.0).status_code == 401, path

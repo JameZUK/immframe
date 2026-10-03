@@ -214,8 +214,18 @@ class Controller:
         # selection changes so a stale slide from the old mode never shows.
         self._pending_item = None
         self._drop_pending = False
-        # Re-show request (rotated preview) — served before anything else.
+        # Item to show before anything else, as (item, history_index):
+        # a rotated preview being re-shown, or a "previous" / "show again"
+        # replay. history_index says which history entry it replays.
         self._priority_item = None
+        self._replay_index: int | None = None   # set by _take_item for the slide being shown
+        # Shown-slide history for Previous and the dashboard timeline.
+        self._history: list[dict] = []
+        self._hist_pos: int | None = None       # index of the slide on screen
+        self._hist_lock = threading.Lock()
+        self._slide_started_at: float | None = None
+        self._next_change_at: float | None = None
+        self._video_playing = False
         # Local file backing the current slide (the prefetched preview, or a
         # composited collage). Served by the HTTP /api/current_image endpoint —
         # collages aren't real Immich assets so the image proxy can't fetch them.
@@ -416,8 +426,10 @@ class Controller:
                 # Video with no poster (download failed or poster disabled):
                 # play directly via MPV, no pi3d render.
                 if is_video and not show_poster:
+                    self._record_shown(asset, None)
                     self._play_video(asset)
                     next_tm = time.time() + time_delay
+                    self._next_change_at = next_tm
                     continue
 
                 # Non-video with no path shouldn't happen, but guard against it.
@@ -427,9 +439,11 @@ class Controller:
                 # --- Standard render path (image / live photo / video poster) ---
                 # Portrait pairing: a second portrait straight after this one
                 # shares the slide (the viewer composites them side by side).
-                pair = self._pair_for(item) if self._portrait_pairs else None
+                replay = self._replay_index is not None
+                pair = self._pair_for(item) if self._portrait_pairs and not replay else None
                 self._current_asset = asset
                 self._pair_asset = pair[1] if pair else None
+                self._record_shown(asset, self._pair_asset)
                 self._publish_state()
 
                 # OCR (when shown) was already fetched by the prefetch worker,
@@ -457,6 +471,7 @@ class Controller:
                     self._play_video_after_poster(asset)
 
                 next_tm = time.time() + time_delay
+                self._next_change_at = next_tm
                 if not loop_running:
                     break
             else:
@@ -469,7 +484,8 @@ class Controller:
         for old in current_paths:
             old.unlink(missing_ok=True)
         self._current_path = None
-        for leftover in (self._pending_item, self._priority_item):
+        leftovers = [self._pending_item, self._priority_item[0] if self._priority_item else None]
+        for leftover in leftovers:
             if leftover is not None and leftover[0] is not None:
                 leftover[0].unlink(missing_ok=True)
         self._pending_item = self._priority_item = None
@@ -478,19 +494,31 @@ class Controller:
     def _take_item(self, *, timeout: float):
         """Next slide: the held-back lookahead item if there is one (unless
         the selection changed since it was fetched), else the queue."""
+        self._replay_index = None
         priority = self._priority_item
         self._priority_item = None
         if priority is not None:
-            return priority
+            item, idx = priority
+            self._replay_index = idx
+            return item
         pending = self._pending_item
         self._pending_item = None
         if pending is not None:
-            if not self._drop_pending:
+            if not self._drop_pending and not self._blocked(pending):
                 return pending
             if pending[0] is not None:
                 pending[0].unlink(missing_ok=True)
         self._drop_pending = False
-        return self._prefetch.next(timeout=timeout)
+        # Items blocked after they were queued are dropped here.
+        while True:
+            item = self._prefetch.next(timeout=timeout)
+            if item is None or not self._blocked(item):
+                return item
+            if item[0] is not None:
+                item[0].unlink(missing_ok=True)
+
+    def _blocked(self, item) -> bool:
+        return item[1].id in self._hidden
 
     @staticmethod
     def _pairable(item) -> bool:
@@ -540,6 +568,13 @@ class Controller:
         except Exception as e:
             log.warning("video play failed: %s", e)
             return
+        self._video_playing = True
+        try:
+            self._wait_video(end_evt)
+        finally:
+            self._video_playing = False
+
+    def _wait_video(self, end_evt: threading.Event) -> None:
         deadline = time.time() + max(1.0, self._config.video.max_play_s)
         paused_video = False
         while not end_evt.wait(timeout=0.5):
@@ -661,33 +696,181 @@ class Controller:
 
     # ── Curation from the sofa ──────────────────────────────────────────
     def hide_current(self) -> dict:
-        """Never show the current asset again: add it (and its live-photo
-        clip) to the local hidden list — instant, needs no write access —
-        then archive it in Immich when the key allows, and advance.
-
-        Returns a summary for the caller: {"hidden": id, "archived": bool,
-        "error": str | None}. Raises ValueError with no current asset or on
-        a collage (synthetic; nothing to hide — use next)."""
+        """Never show the current asset again (see hide_asset)."""
         asset = self._current_asset
         if asset is None:
             raise ValueError("no current asset")
-        if is_collage_id(asset.id):
-            raise ValueError("a collage is not an Immich asset — hide its photos individually")
-        ids = [asset.id]
-        if asset.live_photo_video_id:
-            ids.append(asset.live_photo_video_id)
-        self._hidden.add(*ids)
-        log.info("hidden: %s (%s)", asset.id, asset.original_file_name)
+        return self.hide_asset(asset.id)
+
+    def hide_asset(self, asset_id: str) -> dict:
+        """Block an asset: add it (and its live-photo clip) to the local
+        block list — instant, needs no write access — then archive it in
+        Immich when the key allows. Works for the slide on screen (which
+        then advances), anything in the history or the upcoming queue
+        (dropped when its turn comes), or a bare id.
+
+        Returns {"hidden": id, "archived": bool, "error": str | None}.
+        Raises ValueError for a collage (synthetic; nothing to block)."""
+        if is_collage_id(asset_id):
+            raise ValueError("a collage is not an Immich asset — block its photos individually")
+        asset = self._find_asset(asset_id)
+        companions = [asset.live_photo_video_id] if asset is not None and asset.live_photo_video_id else []
+        details = {"file": asset.original_file_name, "kind": asset.kind.value} if asset is not None else {}
+        self._hidden.add(asset_id, *companions, details=details)
+        log.info("blocked: %s (%s)", asset_id, details.get("file") or "?")
         archived, error = False, None
         try:
-            self._client.update_asset(asset.id, visibility="archive")
+            self._client.update_asset(asset_id, visibility="archive")
             archived = True
-            log.info("archived in Immich: %s", asset.id)
+            self._hidden.annotate(asset_id, archived=True)
+            log.info("archived in Immich: %s", asset_id)
         except ImmichError as e:
             error = str(e)
-            log.warning("archive in Immich failed (hidden locally anyway): %s", e)
-        self.next()
-        return {"hidden": asset.id, "archived": archived, "error": error}
+            log.warning("archive in Immich failed (blocked locally anyway): %s", e)
+        cur = self._current_asset
+        if cur is not None and asset_id in (cur.id, getattr(self._pair_asset, "id", None)):
+            self.next()
+        self._publish_state()
+        return {"hidden": asset_id, "archived": archived, "error": error}
+
+    def unhide(self, asset_ids: list[str]) -> list[dict]:
+        """Unblock assets: remove them from the block list and, when we had
+        archived them in Immich, put them back on the timeline so they can
+        be selected again. Returns one result per id."""
+        results = []
+        for aid in asset_ids:
+            details = self._hidden.remove(aid)
+            if details is None:
+                results.append({"id": aid, "unhidden": False, "error": "not blocked"})
+                continue
+            error = None
+            if details.get("archived"):
+                try:
+                    self._client.update_asset(aid, visibility="timeline")
+                except ImmichError as e:
+                    error = f"unblocked on the frame, but un-archiving in Immich failed: {e}"
+                    log.warning("unarchive %s failed: %s", aid, e)
+            log.info("unblocked: %s", aid)
+            results.append({"id": aid, "unhidden": True, "error": error})
+        self._publish_state()
+        return results
+
+    def hidden_entries(self) -> list[dict]:
+        return self._hidden.entries()
+
+    def _find_asset(self, asset_id: str) -> Asset | None:
+        for a in (self._current_asset, self._pair_asset):
+            if a is not None and a.id == asset_id:
+                return a
+        with self._hist_lock:
+            for e in reversed(self._history):
+                for a in (e["asset"], e["pair"]):
+                    if a is not None and a.id == asset_id:
+                        return a
+        for a in self._prefetch.peek():
+            if a.id == asset_id:
+                return a
+        return None
+
+    # ── History / previous / timeline ───────────────────────────────────
+    HISTORY_MAX = 100
+
+    def _record_shown(self, asset: Asset, pair: Asset | None) -> None:
+        """Called by the loop as each slide goes up. A replay moves the
+        history cursor back to that entry instead of adding a new one."""
+        now = time.time()
+        self._slide_started_at = now
+        with self._hist_lock:
+            idx = self._replay_index
+            if idx is not None and 0 <= idx < len(self._history) \
+                    and self._history[idx]["asset"].id == asset.id:
+                self._hist_pos = idx
+                return
+            self._history.append({"asset": asset, "pair": pair, "shown_at": now})
+            if len(self._history) > self.HISTORY_MAX:
+                del self._history[: len(self._history) - self.HISTORY_MAX]
+            self._hist_pos = len(self._history) - 1
+
+    @staticmethod
+    def _replayable(entry: dict) -> bool:
+        # Collages are composited once and their file is gone after display.
+        return not is_collage_id(entry["asset"].id)
+
+    @property
+    def can_go_back(self) -> bool:
+        with self._hist_lock:
+            pos = self._hist_pos
+            return pos is not None and any(
+                self._replayable(e) for e in self._history[:pos])
+
+    def previous(self) -> dict:
+        """Go back to the slide before the one on screen (skipping collages);
+        repeated calls keep stepping back. Raises ValueError when there is
+        nothing earlier, ImmichError if the photo can't be fetched."""
+        with self._hist_lock:
+            pos = self._hist_pos if self._hist_pos is not None else len(self._history)
+            idx = next((i for i in range(pos - 1, -1, -1) if self._replayable(self._history[i])), None)
+            if idx is None:
+                raise ValueError("nothing earlier to go back to")
+            asset = self._history[idx]["asset"]
+        return self._replay(idx, asset)
+
+    def show_again(self, asset_id: str) -> dict:
+        """Put a slide from the history back on screen now."""
+        with self._hist_lock:
+            idx = next((i for i in range(len(self._history) - 1, -1, -1)
+                        if self._history[i]["asset"].id == asset_id), None)
+            if idx is None:
+                raise ValueError("that photo is no longer in the history")
+            if not self._replayable(self._history[idx]):
+                raise ValueError("collages can't be shown again")
+            asset = self._history[idx]["asset"]
+        return self._replay(idx, asset)
+
+    def _replay(self, idx: int, asset: Asset) -> dict:
+        if asset.id in self._hidden:
+            raise ValueError("that photo is blocked — unblock it first")
+        item = self._prefetch.fetch_now(asset)          # blocking download, caller's thread
+        if item is None or (item[0] is None and asset.kind != AssetKind.VIDEO):
+            raise ImmichError(f"could not fetch {asset.id} from Immich")
+        old = self._priority_item
+        self._priority_item = (item, idx)
+        if old is not None and old[0][0] is not None:
+            old[0][0].unlink(missing_ok=True)
+        self._force_next_evt.set()
+        log.info("replaying history[%d]: %s", idx, asset.id)
+        return {"id": asset.id, "index": idx}
+
+    def timeline(self) -> dict:
+        """Recently shown (oldest → newest, with the on-screen position) and
+        what's queued next, for the dashboard."""
+        with self._hist_lock:
+            history = [dict(e, blocked=e["asset"].id in self._hidden) for e in self._history]
+            pos = self._hist_pos
+        upcoming: list[Asset] = []
+        prio = self._priority_item
+        if prio is not None:
+            upcoming.append(prio[0][1])
+        if self._pending_item is not None:
+            upcoming.append(self._pending_item[1])
+        upcoming.extend(self._prefetch.peek())
+        return {
+            "history": history,
+            "position": pos,
+            "upcoming": [a for a in upcoming if a.id not in self._hidden],
+        }
+
+    @property
+    def slide_started_at(self) -> float | None:
+        return self._slide_started_at
+
+    @property
+    def next_change_at(self) -> float | None:
+        return self._next_change_at
+
+    @property
+    def video_playing(self) -> bool:
+        return self._video_playing
 
     def favorite_current(self, value: bool | None = None) -> dict:
         """Star / unstar the current asset in Immich. `value=None` toggles.
@@ -762,7 +945,7 @@ class Controller:
             if same:
                 item[0].unlink(missing_ok=True)
                 continue                                # not regenerated yet
-            self._priority_item = item
+            self._priority_item = (item, self._hist_pos)
             self._force_next_evt.set()
             return
         log.info("preview for %s not regenerated yet — it will show rotated next time", asset.id)

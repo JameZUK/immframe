@@ -48,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("pause", help="Pause the slideshow")
     sub.add_parser("resume", help="Resume the slideshow")
     sub.add_parser("next", help="Force-advance to the next slide")
+    sub.add_parser("previous", help="Go back to the previous slide")
     sub.add_parser("hide", help="Never show the current photo again (and archive it in Immich)")
     rot_p = sub.add_parser("rotate", help="Rotate the current photo clockwise in Immich (non-destructive)")
     rot_p.add_argument("angle", nargs="?", type=int, default=90, choices=(90, 180, 270))
@@ -261,6 +262,9 @@ def _dispatch_cli(config: Config, args: argparse.Namespace, cmd: str) -> int:
         return 0
     if cmd == "next":
         _post(session, f"{base}/api/next")
+        return 0
+    if cmd == "previous":
+        _post(session, f"{base}/api/previous")
         return 0
     if cmd == "hide":
         r = _post(session, f"{base}/api/hide")

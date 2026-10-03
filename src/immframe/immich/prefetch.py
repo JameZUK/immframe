@@ -142,6 +142,12 @@ class PrefetchWorker:
     def queue_depth(self) -> int:
         return self._queue.qsize()
 
+    def peek(self) -> list[Asset]:
+        """The assets waiting in the queue, in order, without consuming them
+        (for the dashboard's "Up next")."""
+        with self._queue.mutex:
+            return [item[1] for item in list(self._queue.queue)]
+
     # ── Control ─────────────────────────────────────────────────────────
     def drain(self) -> None:
         with self._selector_lock:

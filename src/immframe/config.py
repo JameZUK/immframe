@@ -216,6 +216,9 @@ class HttpConfig:
     auth: bool = True
     username: str = ""
     password: str = ""
+    # Dashboard login: "remember me" sessions last this many days (renewed
+    # while in use). Changing the password logs every session out.
+    session_days: int = 30
 
 
 @dataclass
@@ -435,6 +438,7 @@ class Config:
                 auth=bool(http_raw.get("auth", True)),
                 username=http_raw.get("username", ""),
                 password=http_raw.get("password", ""),
+                session_days=max(1, int(http_raw.get("session_days", 30))),
             ),
         )
 

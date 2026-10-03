@@ -70,6 +70,7 @@ ENTITIES: tuple[Entity, ...] = (
     Entity("text", "album_ids", "Album IDs", icon="mdi:image-album"),
     Entity("text", "smart_query", "Smart query", icon="mdi:magnify"),
     Entity("text", "people_ids", "People IDs", icon="mdi:account-multiple"),
+    Entity("button", "previous", "Previous", icon="mdi:skip-previous", has_state=False),
     Entity("button", "next", "Next", icon="mdi:skip-next", has_state=False),
     Entity("button", "favorite", "Favourite", icon="mdi:heart", has_state=False),
     Entity("button", "hide", "Never show again", icon="mdi:eye-off", has_state=False),
@@ -196,6 +197,8 @@ def _apply_cmd(controller: "Controller", entity: Entity, payload: str) -> None:
         controller.people_ids = [t.strip() for t in s.split(",") if t.strip()]
     elif oid == "next":
         controller.next()
+    elif oid == "previous":
+        controller.previous()
     elif oid == "favorite":
         controller.favorite_current()
     elif oid == "hide":

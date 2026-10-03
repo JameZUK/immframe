@@ -16,6 +16,7 @@ HA, and a complete Lovelace card example.
 | `select.immframe_selection_mode` | select | random / album / smart / scene |
 | `text.immframe_album_ids` | text | Comma-separated album UUIDs |
 | `text.immframe_smart_query` | text | CLIP search query |
+| `button.immframe_previous` | button | Go back to the previous slide (press again to keep going back) |
 | `button.immframe_next` | button | Force-advance to the next slide |
 | `button.immframe_favorite` | button | Star / unstar the photo on screen in Immich (needs a key with `asset.update` — see `immich.write_api_key`) |
 | `button.immframe_hide` | button | Never show the photo on screen again: added to the frame's local hidden list instantly and archived in Immich when the key allows; the slideshow moves on |

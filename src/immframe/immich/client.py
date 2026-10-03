@@ -457,7 +457,7 @@ class ImmichClient:
         self._image_size = "preview"
 
     @contextmanager
-    def stream_preview(self, asset_id: str) -> Iterator[requests.Response]:
+    def stream_preview(self, asset_id: str, size: str | None = None) -> Iterator[requests.Response]:
         """Yield a streaming `requests.Response` at the configured `image_size`.
 
         Used by the HTTP control plane to proxy image bytes to clients
@@ -468,10 +468,11 @@ class ImmichClient:
         `download_preview()`.
         """
         url = self._url(f"/assets/{asset_id}/thumbnail")
+        size = size or self._image_size                  # dashboard asks for preview / thumbnail
         try:
             r = self._session.get(
                 url,
-                params={"size": self._image_size},
+                params={"size": size},
                 stream=True,
                 timeout=self._timeout,
                 allow_redirects=True,
@@ -479,10 +480,10 @@ class ImmichClient:
         except requests.RequestException as e:
             raise ImmichError(f"thumbnail stream {asset_id}: {e}") from e
         try:
-            if r.status_code in (401, 403) and self._image_size == "fullsize":
+            if r.status_code in (401, 403) and size == "fullsize":
                 self._fallback_to_preview(asset_id, r.status_code, r.url)
                 r.close()
-                with self.stream_preview(asset_id) as r2:  # retry once at new size
+                with self.stream_preview(asset_id, "preview") as r2:  # retry once at new size
                     yield r2
                 return
             if r.status_code >= 400:

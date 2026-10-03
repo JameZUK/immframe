@@ -421,9 +421,10 @@ control:
 | `enabled` | bool | `false` | Bind the REST API + dashboard. |
 | `bind` | string | `127.0.0.1` | Bind address. Set `0.0.0.0` to expose on the LAN (only ever with `auth: true`). |
 | `port` | int | `8080` | TCP port. |
-| `auth` | bool | `true` | Require Basic auth. Strongly recommended; the credentials gate the dashboard and all `/api/*` endpoints. |
-| `username` | string | `""` | Basic-auth username. |
-| `password` | string | `""` | Basic-auth password. `${ENV}` expansion supported. |
+| `auth` | bool | `true` | Require a login. Strongly recommended; the credentials gate the dashboard (sign-in page + session cookie) and all `/api/*` endpoints (session cookie or HTTP Basic for scripts). |
+| `username` | string | `""` | Dashboard / API username. |
+| `password` | string | `""` | Dashboard / API password. `${ENV}` expansion supported. |
+| `session_days` | int | `30` | How long the dashboard's *Keep me signed in* session lasts; it renews itself while you use it, so a phone that opens the dashboard now and then stays signed in. Without the tick a session lasts 12 hours. Changing `username` or `password` signs every session out; deleting `~/.local/state/immframe/session.key` does too. Scripts and the CLI keep using HTTP Basic auth. |
 
 `/healthz` is exempt from auth so monitoring tools can probe. Everything else
 (including the dashboard SPA and the image proxy) requires auth when
