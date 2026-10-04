@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -87,6 +88,13 @@ class ImmichClient:
         # Decides the search-filter dialect (see _search_body).
         self._version: tuple[int, int, int] | None = None
         self._version_lock = threading.Lock()
+        # Reachability, for the frame's "can't load photos" screen and the
+        # dashboard banner. Only "Immich isn't working" failures count —
+        # timeouts, connection errors, 5xx — not a 404 for one asset.
+        self._health_lock = threading.Lock()
+        self._last_ok: float | None = None
+        self._failing_since: float | None = None
+        self._last_error: str | None = None
 
     def close(self) -> None:
         if self._owns_session:
@@ -104,12 +112,50 @@ class ImmichClient:
     def _post(self, path: str, *, json: Any = None, **kw: Any) -> Any:
         return self._request("POST", path, json=json, **kw)
 
+    # ── Reachability ────────────────────────────────────────────────────
+    def _note_ok(self) -> None:
+        with self._health_lock:
+            self._last_ok = time.time()
+            self._failing_since = None
+            self._last_error = None
+
+    def _note_failure(self, err: str) -> None:
+        with self._health_lock:
+            if self._failing_since is None:
+                self._failing_since = time.time()
+            self._last_error = err
+
+    @property
+    def health(self) -> dict[str, Any]:
+        """{"ok", "failing_since", "last_error", "last_ok"} — ok is False
+        from the first unreachable-type failure until the next success."""
+        with self._health_lock:
+            return {
+                "ok": self._failing_since is None,
+                "failing_since": self._failing_since,
+                "last_error": self._last_error,
+                "last_ok": self._last_ok,
+            }
+
+    @staticmethod
+    def _short_error(e: Exception) -> str:
+        if isinstance(e, requests.Timeout):
+            return "Immich didn't answer in time"
+        if isinstance(e, requests.ConnectionError):
+            return "couldn't connect to Immich"
+        return type(e).__name__
+
     def _request(self, method: str, path: str, **kw: Any) -> Any:
         kw.setdefault("timeout", self._timeout)
         try:
             r = self._session.request(method, self._url(path), **kw)
         except requests.RequestException as e:
+            self._note_failure(self._short_error(e))
             raise ImmichError(f"{method} {path}: {e}") from e
+        if r.status_code >= 500:
+            self._note_failure(f"Immich error {r.status_code}")
+        elif r.status_code < 400:
+            self._note_ok()
         if r.status_code >= 400:
             raise ImmichError(f"{method} {path}: {r.status_code} {r.text[:200]}")
         if not r.content:
@@ -431,6 +477,8 @@ class ImmichClient:
                     self._fallback_to_preview(asset_id, r.status_code, r.url)
                     return self.download_preview(asset_id, dest)   # retry once at new size
                 if r.status_code >= 400:
+                    if r.status_code >= 500:
+                        self._note_failure(f"Immich error {r.status_code}")
                     raise ImmichError(
                         f"thumbnail {asset_id}: {r.status_code} "
                         f"(final URL: {r.url})"
@@ -441,7 +489,9 @@ class ImmichClient:
                         if chunk:
                             f.write(chunk)
                 os.replace(tmp, dest)
+                self._note_ok()
         except requests.RequestException as e:
+            self._note_failure(self._short_error(e))
             raise ImmichError(f"thumbnail {asset_id}: {e}") from e
 
     def _fallback_to_preview(self, asset_id: str, status: int, final_url: str) -> None:

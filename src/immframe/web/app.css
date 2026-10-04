@@ -133,6 +133,16 @@ button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible, 
   font-size: 11.5px; font-weight: 600; background: var(--surface-3); color: var(--text);
 }
 
+.banner {
+  display: flex; align-items: center; gap: 12px; margin: 12px auto 0; max-width: 1320px;
+  width: calc(100% - 32px); padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--danger-soft); color: var(--text); border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.banner .ic { color: var(--danger); flex: none; }
+.banner div { display: flex; flex-direction: column; font-size: 13.5px; }
+.banner b { font-size: 14.5px; }
+.banner span { color: var(--muted); }
+
 /* ── Layout ──────────────────────────────────────────────────────────── */
 .layout {
   max-width: 1320px; margin: 0 auto;

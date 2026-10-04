@@ -104,6 +104,10 @@ class PrefetchWorker:
         log.info("prefetch cache: %s", self._tmp_dir)
         self._thread: threading.Thread | None = None
 
+    @property
+    def cache_dir(self) -> Path:
+        return self._tmp_dir
+
     def set_collage_canvas(self, w: int, h: int) -> None:
         """Composite collages at the real display resolution (set by the
         controller once pi3d reports its size)."""

@@ -785,3 +785,32 @@ def test_requests_ask_for_uncompressed_replies():
     responses.add_callback(responses.POST, f"{BASE}/api/search/random", callback=cb, content_type="application/json")
     ImmichClient(BASE, "k").random_assets(1)
     assert seen["ae"] == "identity"
+
+
+
+@responses.activate
+def test_health_tracks_unreachable_failures_only():
+    import requests as _rq
+    c = ImmichClient(BASE, "k")
+    assert c.health["ok"] is True and c.health["last_ok"] is None
+    responses.add(responses.POST, f"{BASE}/api/search/random", body=_rq.ConnectTimeout("slow"))
+    with pytest.raises(ImmichError):
+        c.random_assets(1)
+    h = c.health
+    assert h["ok"] is False and h["failing_since"] and h["last_error"] == "Immich didn't answer in time"
+    responses.replace(responses.POST, f"{BASE}/api/search/random", status=500, json={"message": "boom"})
+    with pytest.raises(ImmichError):
+        c.random_assets(1)
+    assert c.health["last_error"] == "Immich error 500" and c.health["failing_since"] == h["failing_since"]
+    responses.replace(responses.POST, f"{BASE}/api/search/random", json=[])
+    c.random_assets(1)
+    assert c.health["ok"] is True and c.health["last_error"] is None and c.health["last_ok"]
+
+
+@responses.activate
+def test_health_ignores_client_errors():
+    c = ImmichClient(BASE, "k")
+    responses.add(responses.GET, f"{BASE}/api/albums/x", status=404, json={"message": "not found"})
+    with pytest.raises(ImmichError):
+        c.album_assets("x")
+    assert c.health["ok"] is True

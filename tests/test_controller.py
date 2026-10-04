@@ -5,6 +5,7 @@ mostly the property setters and their interaction with shadow state.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -840,3 +841,72 @@ def test_poster_hold_includes_crossfade():
     with patch.object(c, "_hold_rendering") as hold, patch.object(c, "_play_video"):
         c._play_video_after_poster(_item("v", kind=AssetKind.VIDEO)[1])
     hold.assert_called_once_with(4.0 + c._config.video.poster_hold_s)
+
+
+# ── "Can't load photos" status screen ─────────────────────────────────────
+
+
+class _FakeViewer:
+    display_width, display_height = 320, 180
+
+    def __init__(self):
+        self.shown = []
+
+    def slideshow_is_running(self, pics=None, **kw):
+        if pics is not None:
+            self.shown.append(pics[0].fname)
+        return (True, False, False)
+
+
+def _status_controller(tmp_path, monkeypatch, now):
+    import immframe.controller as cm
+    c = _controller()
+    c._prefetch.cache_dir = tmp_path
+    c._client.health = {"ok": False, "failing_since": 100.0, "last_error": "Immich didn't answer in time", "last_ok": None}
+    clock = {"t": now}
+    monkeypatch.setattr(cm.time, "time", lambda: clock["t"])
+    return c, clock
+
+
+def test_status_screen_after_15s_with_nothing_on_screen(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    v = _FakeViewer()
+    c._maybe_show_status(v, 60, 4)                      # starts the wait clock
+    clock["t"] += 10
+    c._maybe_show_status(v, 60, 4)
+    assert v.shown == []
+    clock["t"] += 6                                     # 16 s
+    c._maybe_show_status(v, 60, 4)
+    assert len(v.shown) == 1 and Path(v.shown[0]).exists()
+    assert c.immich_status["showing_status"] is True
+    clock["t"] += 10                                    # not refreshed before 30 s
+    c._maybe_show_status(v, 60, 4)
+    assert len(v.shown) == 1
+    first = Path(v.shown[0])
+    clock["t"] += 25
+    c._maybe_show_status(v, 60, 4)
+    assert len(v.shown) == 2 and not first.exists()     # refreshed, old file removed
+
+
+def test_status_screen_waits_much_longer_when_a_photo_is_up(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    c._current_asset = _asset()
+    v = _FakeViewer()
+    c._maybe_show_status(v, 60, 4)
+    clock["t"] += 60 + 100
+    c._maybe_show_status(v, 60, 4)
+    assert v.shown == []                                # keep the photo for a while
+    clock["t"] += 30
+    c._maybe_show_status(v, 60, 4)
+    assert len(v.shown) == 1
+
+
+def test_next_real_slide_clears_the_status(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    v = _FakeViewer()
+    c._maybe_show_status(v, 60, 4)
+    clock["t"] += 20
+    c._maybe_show_status(v, 60, 4)
+    status_file = Path(v.shown[0])
+    _show(c, _asset())
+    assert not status_file.exists() and c._status_path is None and c._waiting_since is None

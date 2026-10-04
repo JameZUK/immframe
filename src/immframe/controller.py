@@ -169,6 +169,17 @@ def _iclamp(value: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
+def _status_asset() -> Asset:
+    """Placeholder asset for the status slide (no overlay text)."""
+    from .immich.models import GeoInfo
+    return Asset(
+        id="status", kind=AssetKind.IMAGE, original_file_name="", mime_type="image/jpeg",
+        width=16, height=9, taken_at=None, geo=GeoInfo(None, None, None, None, None),
+        camera_make=None, camera_model=None, title=None, caption=None, tag_names=(),
+        people=(), favorite=False, live_photo_video_id=None,
+    )
+
+
 def _scene_force_mode(source: str):
     """Config `scene_source` → SceneSelector.force_mode ("auto" = detect)."""
     return None if source == "auto" else source
@@ -227,6 +238,10 @@ class Controller:
         self._slide_started_at: float | None = None
         self._next_change_at: float | None = None
         self._video_playing = False
+        # "Can't load photos" screen (see _maybe_show_status).
+        self._waiting_since: float | None = None
+        self._status_shown_at: float | None = None
+        self._status_path: Path | None = None
         # Local file backing the current slide (the prefetched preview, or a
         # composited collage). Served by the HTTP /api/current_image endpoint —
         # collages aren't real Immich assets so the image proxy can't fetch them.
@@ -403,6 +418,7 @@ class Controller:
             if advance:
                 item = self._take_item(timeout=1.0)
                 if item is None:
+                    self._maybe_show_status(viewer, time_delay, fade_time)
                     # Backoff: nothing ready, just keep drawing current
                     if not viewer.slideshow_is_running(
                         time_delay=time_delay, fade_time=fade_time, paused=self._paused
@@ -526,6 +542,57 @@ class Controller:
         log.info("live photo style: %s", self.live_photo)
         self._publish_state()
         return self.live_photo
+
+    # ── "Can't load photos" screen ──────────────────────────────────────
+    STATUS_FIRST_S = 15.0        # nothing on screen yet: show the status after this
+    STATUS_STALE_S = 120.0       # a photo is up: only once it's this far past its time
+    STATUS_REFRESH_S = 30.0
+
+    def _maybe_show_status(self, viewer, time_delay: float, fade_time: float) -> None:
+        """Called when a slide is due but nothing is ready. Instead of a black
+        screen (first boot) or a photo frozen for ages (Immich died mid-run),
+        put up a status slide saying what's wrong; it's refreshed every 30 s
+        and the next real photo replaces it."""
+        now = time.time()
+        if self._waiting_since is None:
+            self._waiting_since = now
+            return
+        waited = now - self._waiting_since
+        threshold = self.STATUS_FIRST_S if self._current_asset is None else time_delay + self.STATUS_STALE_S
+        if waited < threshold:
+            return
+        if self._status_shown_at is not None and now - self._status_shown_at < self.STATUS_REFRESH_S:
+            return
+        from .status_screen import render, status_lines
+        lines = status_lines(self._config.immich.url, self._client.health, now=now)
+        dest = self._prefetch.cache_dir / f"status-{int(now)}.jpg"
+        size = (getattr(viewer, "display_width", 1920), getattr(viewer, "display_height", 1080))
+        if not render(dest, size, lines):
+            return
+        if self._status_shown_at is None:
+            log.warning("no photos for %.0f s — showing the status screen (%s)", waited, lines[2])
+        try:
+            viewer.slideshow_is_running(
+                [Pic(str(dest), _status_asset(), ocr_text=None), None],
+                time_delay=time_delay, fade_time=fade_time, paused=self._paused,
+            )
+        except Exception as e:                          # never let the status screen kill the loop
+            log.warning("status screen failed: %s", e)
+            dest.unlink(missing_ok=True)
+            return
+        if self._status_path is not None:
+            self._status_path.unlink(missing_ok=True)
+        self._status_path = dest
+        self._status_shown_at = now
+
+    @property
+    def immich_status(self) -> dict:
+        """Immich reachability + whether the frame is showing the status
+        screen, for /api/state and the dashboard banner."""
+        h = dict(self._client.health)
+        h["showing_status"] = self._status_path is not None
+        h["waiting_since"] = self._waiting_since
+        return h
 
     # ── Queue access + portrait pairing ─────────────────────────────────
     def _take_item(self, *, timeout: float):
@@ -845,6 +912,12 @@ class Controller:
         history cursor back to that entry instead of adding a new one."""
         now = time.time()
         self._slide_started_at = now
+        self._waiting_since = None                      # photos are flowing again
+        if self._status_path is not None:
+            self._status_path.unlink(missing_ok=True)
+            self._status_path = None
+            self._status_shown_at = None
+            log.info("photos are loading again — status screen cleared")
         with self._hist_lock:
             idx = self._replay_index
             if idx is not None and 0 <= idx < len(self._history) \

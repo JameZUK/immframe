@@ -753,6 +753,7 @@ class _Handler(BaseHTTPRequestHandler):
             "next_change_at": getattr(c, "next_change_at", None),
             "video_playing": bool(getattr(c, "video_playing", False)),
             "immich_url": self._immich_url(),
+            "immich": getattr(c, "immich_status", None),
             "now": time.time(),
         })
 

@@ -215,6 +215,20 @@ function render(s) {
   const a = s.current_asset;
   const pa = s.pair_asset;
 
+  // Immich reachability banner
+  const im = s.immich;
+  const down = im && im.ok === false;
+  $("immich-banner").hidden = !down;
+  if (down) {
+    const mins = im.failing_since ? Math.max(1, Math.round((nowMs() / 1000 - im.failing_since) / 60)) : null;
+    $("immich-banner-title").textContent = "Can't load photos from Immich — retrying";
+    $("immich-banner-detail").textContent = [
+      mins ? `Not responding for ${mins} min` : null,
+      im.last_error,
+      im.showing_status ? "the frame is showing a status screen" : "the frame keeps showing the last photo",
+    ].filter(Boolean).join(" · ");
+  }
+
   // Status pill
   const st = $("status");
   st.dataset.status = s.paused ? "paused" : "ok";

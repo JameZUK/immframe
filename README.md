@@ -64,7 +64,10 @@ UX picframe got right.
   dropped even after they've been queued
 - Speaks Immich 3.2's structured search filters (and the older flat
   fields on earlier servers — detected from `/server/version`)
-- Graceful degradation if Immich is briefly unavailable
+- Graceful degradation if Immich is unavailable: the frame keeps the last
+  photo up, or — at boot, or after a long outage — shows a "Can't load
+  photos from Immich — retrying" screen with how long and why, and the
+  dashboard shows a banner; it carries on by itself when Immich is back
 - Home Assistant integration via MQTT auto-discovery — see
   [docs/home-assistant.md](./docs/home-assistant.md) for entities and a
   ready-made Lovelace card
