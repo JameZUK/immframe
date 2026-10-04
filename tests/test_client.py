@@ -260,23 +260,18 @@ def test_server_version_is_fetched_once():
 
 
 @responses.activate
-def test_search_smart_passes_page_and_filter():
-    _server_version(3, 2, 0)
+def test_search_smart_sends_filter_and_never_page():
+    """Regression: Immich 3.2 answers 400 "Deprecated field page cannot be
+    combined with filter" — smart search must not send `page`."""
+    _server_version(3, 2, 4)
     cap = _capture(responses.POST, "/search/smart", {"assets": {"items": [], "total": 0, "count": 0}})
     c = ImmichClient(BASE, "k")
-    c.search_smart("sunset", count=25, page=3, with_video=False)
+    c.search_smart("sunset", count=100, with_video=False)
     body = cap["body"]
-    assert body["query"] == "sunset" and body["size"] == 25 and body["page"] == 3
+    assert body["query"] == "sunset" and body["size"] == 100
+    assert "page" not in body
     assert body["filter"]["visibility"] == {"eq": "timeline"}
     assert body["filter"]["type"] == {"eq": "IMAGE"}
-
-
-@responses.activate
-def test_search_smart_page_1_omits_page():
-    cap = _capture(responses.POST, "/search/smart", {"assets": {"items": [], "total": 0, "count": 0}})
-    c = ImmichClient(BASE, "k")
-    c.search_smart("sunset", count=25, page=1)
-    assert "page" not in cap["body"]
 
 
 @responses.activate
@@ -774,3 +769,19 @@ def test_rotate_permission_error_surfaces():
     c = ImmichClient(BASE, "k")
     with pytest.raises(ImmichError, match="asset.edit.get"):
         c.rotate_asset("x")
+
+
+
+@responses.activate
+def test_requests_ask_for_uncompressed_replies():
+    """Regression: compressed replies hung behind photos.jamez.me.uk after
+    the Immich 3.2.4 update, so the client must send Accept-Encoding: identity."""
+    seen = {}
+
+    def cb(request):
+        seen["ae"] = request.headers.get("Accept-Encoding")
+        return (200, {}, "[]")
+
+    responses.add_callback(responses.POST, f"{BASE}/api/search/random", callback=cb, content_type="application/json")
+    ImmichClient(BASE, "k").random_assets(1)
+    assert seen["ae"] == "identity"

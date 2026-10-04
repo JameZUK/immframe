@@ -109,7 +109,7 @@ def test_smart_passes_query():
     client.search_smart.return_value = [_a("s")]
     sel = SmartSelector(client, "beach", pages=1)
     out = sel.next_batch(3)
-    client.search_smart.assert_called_once_with("beach", count=3, page=1)
+    client.search_smart.assert_called_once_with("beach", count=3)
     assert out[0].id == "s"
 
 
@@ -119,21 +119,29 @@ def test_smart_set_query_replaces():
     sel = SmartSelector(client, "old", pages=1)
     sel.set_query("new")
     sel.next_batch(5)
-    client.search_smart.assert_called_once_with("new", count=5, page=1)
+    client.search_smart.assert_called_once_with("new", count=5)
 
 
-def test_smart_samples_pages_and_falls_back_to_page_1():
-    """CLIP ranking is deterministic — sample a random page from the top
-    `pages` so a query doesn't show the same N photos forever; an empty
-    later page (few matches) falls back to page 1."""
+def test_smart_fetches_pages_worth_and_samples():
+    """CLIP ranking is deterministic — fetch the top n*pages and draw n at
+    random, so a query doesn't show the same n photos every time."""
     client = MagicMock()
-    client.search_smart.side_effect = lambda q, count, page: [_a(f"p{page}")] if page == 1 else []
+    pool = [_a(f"p{i}") for i in range(8)]
+    client.search_smart.return_value = pool
     sel = SmartSelector(client, "beach", pages=4)
-    for _ in range(40):
+    seen = set()
+    for _ in range(30):
         out = sel.next_batch(2)
-        assert out and out[0].id == "p1"                # fallback delivered
-    pages_seen = {c.kwargs["page"] for c in client.search_smart.call_args_list}
-    assert pages_seen == {1, 2, 3, 4}
+        assert len(out) == 2 and len({a.id for a in out}) == 2
+        seen |= {a.id for a in out}
+    client.search_smart.assert_called_with("beach", count=8)
+    assert len(seen) > 2                                    # not stuck on the top two
+
+
+def test_smart_few_matches_returns_them_all():
+    client = MagicMock()
+    client.search_smart.return_value = [_a("only")]
+    assert [a.id for a in SmartSelector(client, "rare", pages=4).next_batch(5)] == ["only"]
 
 
 def test_random_selector_passes_filters():

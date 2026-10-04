@@ -144,13 +144,23 @@ class AlbumSelector:
         return assets
 
 
+def sample_top(assets: list[Asset], n: int) -> list[Asset]:
+    """A random `n` of `assets` (all of them, shuffled, when there are fewer)."""
+    if len(assets) <= n:
+        out = list(assets)
+        random.shuffle(out)
+        return out
+    return random.sample(assets, n)
+
+
 class SmartSelector:
     """CLIP smart-search-driven selection.
 
     Calls Immich's smart search per batch. `set_query()` takes effect on the
-    next call. CLIP ranking is deterministic, so each call draws a random
-    page from the top `pages` pages (page size = the batch size) — otherwise
-    a query would show the same top-N photos forever.
+    next call. CLIP ranking is deterministic, so each call fetches the top
+    `n * pages` matches and draws a random `n` of them — otherwise a query
+    would show the same top-N photos forever. (Not Immich's `page` field:
+    3.2 rejects it alongside the structured filter.)
     """
 
     def __init__(self, client: ImmichClient, query: str, *, pages: int = 4) -> None:
@@ -168,12 +178,8 @@ class SmartSelector:
             q = self._query
         if not q:
             return []
-        page = random.randint(1, self._pages)
         try:
-            out = self._client.search_smart(q, count=n, page=page)
-            if not out and page > 1:                     # fewer matches than pages
-                out = self._client.search_smart(q, count=n, page=1)
-            return out
+            return sample_top(self._client.search_smart(q, count=n * self._pages), n)
         except ImmichError as e:
             log.warning("search_smart failed: %s", e)
             return []
@@ -643,8 +649,8 @@ class SceneSelector:
     ) -> None:
         """`force_mode` skips auto-detect — `selection.scene_source` in
         config (or `source:` on a playlist entry) lands here. `pages`: for
-        the CLIP-backed sources (things / curated), each rotation fetches a
-        random page from the top `pages` pages of the ranked results so a
+        the CLIP-backed sources (things / curated), each rotation fetches the
+        top `pool_size * pages` matches and samples `pool_size` of them so a
         label doesn't always produce the same 25 photos."""
         self._client = client
         self._pool_size = pool_size
@@ -792,11 +798,8 @@ class SceneSelector:
     def _query_assets(self, label: str) -> list[Asset]:
         try:
             if self._mode in ("things", "curated"):
-                page = random.randint(1, self._pages)
-                out = self._client.search_smart(label, count=self._pool_size, page=page)
-                if not out and page > 1:                 # fewer matches than pages
-                    out = self._client.search_smart(label, count=self._pool_size, page=1)
-                return out
+                hits = self._client.search_smart(label, count=self._pool_size * self._pages)
+                return sample_top(hits, self._pool_size)
             if self._mode == "city":
                 # Random sample, not /search/metadata: that returns the same
                 # newest-first page for a city every rotation.

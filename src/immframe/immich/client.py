@@ -77,6 +77,12 @@ class ImmichClient:
             self._owns_session = False
         self._session.headers.setdefault(self.AUTH_HEADER, api_key)
         self._session.headers.setdefault("Accept", "application/json")
+        # Ask for uncompressed replies. requests advertises gzip/deflate by
+        # default, and after the Immich 3.2.4 update (photos.jamez.me.uk,
+        # 2026-10-04) every compressed search/thumbnail reply hung until the
+        # read timeout — the frame stayed black. JSON replies are small and
+        # images aren't compressible, so identity costs nothing.
+        self._session.headers["Accept-Encoding"] = "identity"
         # Server version, resolved lazily on the first search and cached.
         # Decides the search-filter dialect (see _search_body).
         self._version: tuple[int, int, int] | None = None
@@ -199,19 +205,17 @@ class ImmichClient:
         return [_to_asset(d) for d in data if showable(d)]
 
     def search_smart(
-        self, query: str, *, count: int = 20, page: int | None = None,
-        with_video: bool = True,
+        self, query: str, *, count: int = 20, with_video: bool = True,
     ) -> list[Asset]:
-        """POST /search/smart — CLIP search, ranked by similarity.
+        """POST /search/smart — CLIP search, the top `count` by similarity.
 
-        Results are deterministic for a query; `page` (1-based, `count` per
-        page) lets callers sample beyond the top-N so a repeated label
-        doesn't always yield the same photos.
+        No paging: Immich 3.2 rejects the (deprecated) `page` field next to
+        a structured `filter` ("Deprecated field page cannot be combined
+        with filter"). Callers that want variety ask for a bigger `count`
+        and sample from it.
         """
         body = self._search_body(count, images_only=not with_video)
         body["query"] = query
-        if page is not None and page > 1:
-            body["page"] = int(page)
         data = self._post("/search/smart", json=body)
         return _items_from_search(data)
 
