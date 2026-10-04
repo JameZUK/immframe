@@ -35,7 +35,7 @@ Endpoints:
     POST /api/config                 {"config": {...}} | {"yaml": "..."}, optional "restart": true
     POST /api/restart                stop so the supervisor relaunches with the config on disk
 
-    POST /api/live_photo             {"mode"?, "hold_s"?, "play_s"?, "repeats"?, "speed"?, "pause_s"?, "after"?}
+    POST /api/live_photo             {"mode"?, "order"?, "hold_s"?, "play_s"?, "repeats"?, "speed"?, "pause_s"?, "after"?}
     POST /api/previous               back to the slide before the one on screen
     POST /api/show                   {"id": "..."} — put a slide from the history back on screen
     GET  /api/timeline               recently shown + up next
@@ -80,7 +80,7 @@ from ..config import SELECTION_MODES, Config, HttpConfig
 from ..controller import SHOW_TEXT_KEYS
 from ..immich.client import ImmichClient, ImmichError
 from ..sessions import COOKIE_NAME, SessionManager, clear_cookie_header, cookie_header
-from ..video.live import LIVE_AFTER, LIVE_MODES
+from ..video.live import LIVE_AFTER, LIVE_MODES, LIVE_ORDER
 
 if TYPE_CHECKING:
     from ..controller import Controller
@@ -575,6 +575,8 @@ class _Handler(BaseHTTPRequestHandler):
             for k, v in body.items():
                 if k == "mode" and v not in LIVE_MODES:
                     raise _HttpError(HTTPStatus.BAD_REQUEST, f"mode must be one of {LIVE_MODES}")
+                if k == "order" and v not in LIVE_ORDER:
+                    raise _HttpError(HTTPStatus.BAD_REQUEST, f"order must be one of {LIVE_ORDER}")
                 if k == "after" and v not in LIVE_AFTER:
                     raise _HttpError(HTTPStatus.BAD_REQUEST, f"after must be one of {LIVE_AFTER}")
                 if k in numeric and (isinstance(v, bool) or not isinstance(v, (int, float))):

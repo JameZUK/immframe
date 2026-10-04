@@ -32,7 +32,8 @@ video:
   vo: gpu                                  # MPV video output: gpu | x11 | drm | sdl
   fit: contain                             # contain (letterbox, preserve aspect) | cover (fill + crop)
   # Live / motion photos (HEIC/JPEG with a short clip): still → clip → still
-  live_photo_hold_s: 1.0                   # seconds the photo shows before the clip
+  live_photo_order: photo_first            # photo_first | video_first
+  live_photo_hold_s: 2.0                   # photo_first: seconds the photo is fully shown before the clip
   live_photo_mode: once                    # once | loop | bounce | reverse | still
   live_photo_play_s: 6.0                   # loop/bounce run time; caps once/reverse (0 = none)
   live_photo_repeats: 0                    # loop/bounce: N cycles instead of play_s (0 = off)
@@ -41,7 +42,7 @@ video:
   live_photo_after: still                  # still = photo for the rest of the slide | next
   live_photo_hwdec: "no"                   # software decode (Pi's HW decoder plays these at ~0.2x)
   poster: true                             # render matted still poster before videos
-  poster_hold_s: 3.0                       # seconds to hold the poster before MPV starts
+  poster_hold_s: 3.0                       # seconds the poster is fully shown (after the crossfade) before MPV starts
   rotate: auto                             # auto | no | 0 | 90 | 180 | 270 (override container rotation)
   fullscreen: false                        # let the compositor fullscreen MPV (true only on non-kiosk desktops)
   max_play_s: 60.0                         # hard cap per video play (sec)

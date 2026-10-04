@@ -511,14 +511,14 @@ class Controller:
     @property
     def live_photo(self) -> dict:
         l = self._live
-        return {"mode": l.mode, "hold_s": l.hold_s, "play_s": l.play_s, "repeats": l.repeats,
-                "speed": l.speed, "pause_s": l.pause_s, "after": l.after}
+        return {"mode": l.mode, "order": l.order, "hold_s": l.hold_s, "play_s": l.play_s,
+                "repeats": l.repeats, "speed": l.speed, "pause_s": l.pause_s, "after": l.after}
 
     def set_live_photo(self, **fields) -> dict:
         """Update any of mode / hold_s / play_s / repeats / speed / pause_s /
         after. Takes effect from the next live photo. Raises ValueError for
         an unknown field or value."""
-        allowed = {"mode", "hold_s", "play_s", "repeats", "speed", "pause_s", "after"}
+        allowed = {"mode", "order", "hold_s", "play_s", "repeats", "speed", "pause_s", "after"}
         bad = set(fields) - allowed
         if bad:
             raise ValueError(f"unknown live-photo setting(s): {sorted(bad)}")
@@ -688,7 +688,12 @@ class Controller:
         r = recipe(live)
         if r is None:                                   # mode "still": photo only
             return
-        self._hold_rendering(live.hold_s)
+        if live.order == "photo_first":
+            # Let the crossfade into the photo finish, *then* hold it: the
+            # hold used to start with the fade, so with fade 4 s / hold 1 s
+            # the clip opened over a photo only 25 % faded in — it looked as
+            # if the video came first.
+            self._hold_rendering(self._fade_time + live.hold_s)
         if self._stop_evt.is_set() or self._force_next_evt.is_set():
             return                                      # skipped while the still was up
         url, headers = self._client.video_play_args(asset.live_photo_video_id)
@@ -702,7 +707,8 @@ class Controller:
         still for `video.poster_hold_s` then play the video through MPV."""
         if self._video_player is None or not self._config.video.enabled:
             return
-        self._hold_rendering(max(0.0, self._config.video.poster_hold_s))
+        # Crossfade into the poster first, then hold it (see _play_live_photo).
+        self._hold_rendering(self._fade_time + max(0.0, self._config.video.poster_hold_s))
         if self._stop_evt.is_set():
             return
         self._play_video(asset)

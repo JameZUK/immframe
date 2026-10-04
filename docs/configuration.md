@@ -164,8 +164,9 @@ selection:
 | `vo` | enum | `gpu` | MPV video output backend. `gpu` (the default — KMS/DRM on Pi, X11 GL elsewhere), `x11`, `drm`, or `sdl`. |
 | `fit` | enum | `contain` | How video fits the screen. `contain` preserves aspect ratio and letterboxes/pillarboxes the gaps (no cropping). `cover` preserves aspect ratio but fills the whole screen, cropping the overflow — good for edge-to-edge playback on a 16:9 panel at the cost of clipping the edges. |
 | `poster` | bool | `true` | When `true`, render the video's matted preview JPEG via pi3d first (same fade/blur/mat treatment as images), then hand off to MPV. When `false`, videos go straight to MPV fullscreen with no frame. |
-| `poster_hold_s` | float | `3.0` | Seconds to hold the matted poster before MPV starts. |
-| `live_photo_hold_s` | float | `1.0` | Seconds the photo shows before a live / motion photo's clip plays. |
+| `poster_hold_s` | float | `3.0` | Seconds the matted poster is fully visible — counted after the crossfade (`fade_time`) — before the video starts. |
+| `live_photo_order` | enum | `photo_first` | `photo_first`: the photo crossfades in and is shown for `live_photo_hold_s`, then the clip plays. `video_first`: the clip plays straight away, then the photo stays for the rest of the slide. |
+| `live_photo_hold_s` | float | `2.0` | With `photo_first`: seconds the photo is fully visible — counted *after* the crossfade (`fade_time`) — before the clip plays. |
 | `live_photo_mode` | enum | `once` | How the clip plays: `once` (forward once), `loop` (forward, repeatedly), `bounce` (forward then backward, repeatedly — a "boomerang"), `reverse` (backward once), `still` (never play the motion; photo only). Also adjustable from the dashboard and HA. |
 | `live_photo_play_s` | float | `6.0` | How long `loop` / `bounce` keep going. For `once` / `reverse` it caps the clip's own length. `0` = no limit (the global `max_play_s` still applies). |
 | `live_photo_repeats` | int | `0` | `loop` / `bounce`: stop after this many cycles (one bounce cycle = there and back) instead of after `live_photo_play_s`. `0` = use the time. |

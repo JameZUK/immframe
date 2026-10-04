@@ -60,3 +60,9 @@ def test_validation_clamps_and_rejects():
 
 def test_speed_passes_through():
     assert recipe(LiveSettings(mode="once", speed=0.5)).speed == 0.5
+
+
+def test_order_validated():
+    assert LiveSettings(order="video_first").validated().order == "video_first"
+    with pytest.raises(ValueError, match="live_photo_order"):
+        LiveSettings(order="sideways").validated()

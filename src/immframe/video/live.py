@@ -13,7 +13,11 @@ user's settings into an MPV playback recipe for the clip:
 
 Timing knobs (all in `video:` config, adjustable live from the dashboard):
 
-    live_photo_hold_s    still shown before the clip starts
+    live_photo_order     photo_first = the photo, fully faded in, for hold_s,
+                         then the clip; video_first = the clip straight away,
+                         then the photo for the rest of the slide
+    live_photo_hold_s    photo_first: how long the photo is fully visible
+                         before the clip starts (counted after the crossfade)
     live_photo_play_s    how long loop / bounce keep going (once / reverse: a
                          cap on the clip's own length; 0 = no cap)
     live_photo_repeats   loop / bounce: stop after this many cycles instead
@@ -35,6 +39,7 @@ from dataclasses import dataclass
 
 LIVE_MODES: tuple[str, ...] = ("once", "loop", "bounce", "reverse", "still")
 LIVE_AFTER: tuple[str, ...] = ("still", "next")
+LIVE_ORDER: tuple[str, ...] = ("photo_first", "video_first")
 MAX_REVERSE_S = 6.0
 SPEED_RANGE = (0.25, 4.0)
 
@@ -49,11 +54,14 @@ class LiveSettings:
     pause_s: float = 0.0
     after: str = "still"
     hwdec: str = "no"
+    order: str = "photo_first"
 
     def validated(self) -> "LiveSettings":
         """A clamped copy; raises ValueError for an unknown mode / after."""
         if self.mode not in LIVE_MODES:
             raise ValueError(f"live_photo_mode must be one of {LIVE_MODES}; got {self.mode!r}")
+        if self.order not in LIVE_ORDER:
+            raise ValueError(f"live_photo_order must be one of {LIVE_ORDER}; got {self.order!r}")
         if self.after not in LIVE_AFTER:
             raise ValueError(f"live_photo_after must be one of {LIVE_AFTER}; got {self.after!r}")
         lo, hi = SPEED_RANGE
@@ -66,6 +74,7 @@ class LiveSettings:
             pause_s=min(max(0.0, float(self.pause_s)), 10.0),
             after=self.after,
             hwdec=str(self.hwdec or "no"),
+            order=self.order,
         )
 
 
@@ -123,4 +132,5 @@ def live_settings_from(video) -> LiveSettings:
         play_s=video.live_photo_play_s, repeats=video.live_photo_repeats,
         speed=video.live_photo_speed, pause_s=video.live_photo_pause_s,
         after=video.live_photo_after, hwdec=video.live_photo_hwdec,
+        order=video.live_photo_order,
     )

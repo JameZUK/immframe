@@ -1224,7 +1224,9 @@ def test_post_live_photo_validates_and_updates():
         r = requests.post(f"{base}/api/live_photo", json={"mode": "bounce", "speed": 0.5, "pause_s": 1}, timeout=2.0, auth=_auth())
         assert r.status_code == 200 and r.json()["live_photo"]["mode"] == "bounce"
         assert ctrl.live_calls[-1] == {"mode": "bounce", "speed": 0.5, "pause_s": 1}
-        for bad in ({"mode": "wobble"}, {"after": "later"}, {"speed": "fast"}, {"repeats": True}, {}):
+        r = requests.post(f"{base}/api/live_photo", json={"order": "video_first"}, timeout=2.0, auth=_auth())
+        assert r.status_code == 200 and ctrl.live_calls[-1] == {"order": "video_first"}
+        for bad in ({"order": "sideways"}, {"mode": "wobble"}, {"after": "later"}, {"speed": "fast"}, {"repeats": True}, {}):
             assert requests.post(f"{base}/api/live_photo", json=bad, timeout=2.0, auth=_auth()).status_code == 400, bad
         assert requests.post(f"{base}/api/live_photo", json={"mode": "once"}, timeout=2.0).status_code == 401
 

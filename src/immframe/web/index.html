@@ -212,7 +212,14 @@
           <span class="muted small" id="live-mode-hint"></span>
         </div>
         <div id="live-timing">
-          <label class="slider"><span>Photo first for <b id="live-hold-value">—</b></span><input type="range" id="live-hold" min="0" max="10" step="0.5"></label>
+          <div class="field">
+            <span>Show first</span>
+            <div class="segmented" id="live-order">
+              <button type="button" data-value="photo_first">Photo, then clip</button>
+              <button type="button" data-value="video_first">Clip, then photo</button>
+            </div>
+          </div>
+          <label class="slider" id="live-hold-row"><span>Photo first for <b id="live-hold-value">—</b></span><input type="range" id="live-hold" min="0" max="10" step="0.5"></label>
           <label class="slider" data-live="repeat"><span>Keep it going for <b id="live-play-value">—</b></span><input type="range" id="live-play" min="0" max="30" step="1"></label>
           <label class="slider" data-live="single"><span>Stop the clip after <b id="live-cap-value">—</b></span><input type="range" id="live-cap" min="0" max="30" step="1"></label>
           <label class="slider" data-live="repeat"><span>Or repeat <b id="live-repeats-value">—</b></span><input type="range" id="live-repeats" min="0" max="10" step="1"></label>

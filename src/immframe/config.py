@@ -134,7 +134,8 @@ class VideoConfig:
     #   "cover"   — preserve aspect, fill the screen, crop the overflow
     fit: str = "contain"
     # Live / motion photos (HEIC/JPEG with a short clip). See video/live.py.
-    live_photo_hold_s: float = 1.0          # still shown before the clip
+    live_photo_order: str = "photo_first"   # photo_first | video_first
+    live_photo_hold_s: float = 2.0          # photo fully visible before the clip (after the crossfade)
     live_photo_mode: str = "once"           # once | loop | bounce | reverse | still
     live_photo_play_s: float = 6.0          # loop/bounce duration; once/reverse cap (0 = none)
     live_photo_repeats: int = 0             # loop/bounce: cycles instead of play_s (0 = use play_s)
@@ -375,7 +376,8 @@ class Config:
             mute=bool(vid_raw.get("mute", True)),
             vo=vid_raw.get("vo", "gpu"),
             fit=str(vid_raw.get("fit", "contain")),
-            live_photo_hold_s=float(vid_raw.get("live_photo_hold_s", 1.0)),
+            live_photo_hold_s=float(vid_raw.get("live_photo_hold_s", 2.0)),
+            live_photo_order=str(vid_raw.get("live_photo_order", "photo_first")),
             live_photo_mode=str(vid_raw.get("live_photo_mode", "once")),
             live_photo_play_s=float(vid_raw.get("live_photo_play_s", 6.0)),
             live_photo_repeats=int(vid_raw.get("live_photo_repeats", 0)),

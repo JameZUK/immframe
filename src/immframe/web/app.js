@@ -415,6 +415,9 @@ function renderControls(s) {
     const repeating = mode === "loop" || mode === "bounce";
     for (const n of document.querySelectorAll("[data-live='repeat']")) n.hidden = !repeating;
     for (const n of document.querySelectorAll("[data-live='single']")) n.hidden = repeating;
+    if (fresh("live-order")) for (const b of $("live-order").children) b.classList.toggle("on", b.dataset.value === (live.order || "photo_first"));
+    const order = [...$("live-order").children].find(b => b.classList.contains("on"))?.dataset.value || "photo_first";
+    $("live-hold-row").hidden = order !== "photo_first";
     if (fresh("live-hold")) $("live-hold").value = live.hold_s;
     if (fresh("live-play")) $("live-play").value = live.play_s;
     if (fresh("live-cap")) $("live-cap").value = live.play_s;
@@ -739,6 +742,15 @@ function wire() {
       for (const x of $("live-mode").children) x.classList.toggle("on", x === b);
       if (state) renderControls(state);
       attempt(() => post("/api/live_photo", { mode: b.dataset.value }), `Live photos: ${b.textContent.toLowerCase()}`);
+    });
+  }
+  for (const b of $("live-order").children) {
+    b.addEventListener("click", () => {
+      touch("live-order");
+      for (const x of $("live-order").children) x.classList.toggle("on", x === b);
+      if (state) renderControls(state);
+      attempt(() => post("/api/live_photo", { order: b.dataset.value }),
+        b.dataset.value === "photo_first" ? "Live photos: photo first, then the clip" : "Live photos: clip first, then the photo");
     });
   }
   for (const [id, field] of [["live-hold", "hold_s"], ["live-play", "play_s"], ["live-cap", "play_s"],

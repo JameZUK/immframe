@@ -804,3 +804,39 @@ def test_block_photo_inside_a_collage_finds_its_details(tmp_path):
     c.hide_asset(inner.id)
     e = c.hidden_entries()[0]
     assert e["id"] == inner.id and e["file"] == "x.jpg" and e["companions"] == ["j" * 36]
+
+
+def test_photo_first_holds_for_the_crossfade_plus_hold_time():
+    """Regression: the hold used to start with the crossfade, so with fade 4 s
+    and hold 1 s the clip opened over a photo only 25 % faded in."""
+    c = _controller(fade_time=4.0)
+    c._video_player = MagicMock()
+    c._client.video_play_args.return_value = ("u", {})
+    c.set_live_photo(order="photo_first", hold_s=2.0)
+    with patch.object(c, "_hold_rendering") as hold, patch.object(c, "_play_video_url") as play:
+        c._play_live_photo(_live_asset())
+    hold.assert_called_once_with(6.0)
+    play.assert_called_once()
+
+
+def test_video_first_plays_immediately():
+    c = _controller(fade_time=4.0)
+    c._video_player = MagicMock()
+    c._client.video_play_args.return_value = ("u", {})
+    c.set_live_photo(order="video_first")
+    with patch.object(c, "_hold_rendering") as hold, patch.object(c, "_play_video_url") as play:
+        c._play_live_photo(_live_asset())
+    hold.assert_not_called()
+    play.assert_called_once()
+    assert c.live_photo["order"] == "video_first"
+    with pytest.raises(ValueError):
+        c.set_live_photo(order="sideways")
+
+
+def test_poster_hold_includes_crossfade():
+    from immframe.immich.models import AssetKind
+    c = _controller(fade_time=4.0)
+    c._video_player = MagicMock()
+    with patch.object(c, "_hold_rendering") as hold, patch.object(c, "_play_video"):
+        c._play_video_after_poster(_item("v", kind=AssetKind.VIDEO)[1])
+    hold.assert_called_once_with(4.0 + c._config.video.poster_hold_s)
