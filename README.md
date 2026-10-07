@@ -10,6 +10,37 @@ pi3d-based renderer, mat compositor and overlay text code are vendored from
 picframe; the filesystem scanner, SQLite cache, EXIF/IPTC parser and
 reverse-geocoder are dropped in favour of Immich's API.
 
+![The immframe dashboard: the photo on the frame, transport and curation controls, and the timeline of recent and upcoming photos](docs/screenshots/desktop-timeline.png)
+
+<sub>Screenshots use generated sample images and made-up places — no real photo library.</sub>
+
+## Screenshots
+
+### The dashboard
+
+A phone-first web app served by the frame itself (`http://<pi-ip>:8080/`),
+with a proper sign-in page and a session that remembers you.
+
+| Now showing | Blocked photos | Live photo styles | Sign in |
+|---|---|---|---|
+| ![Now showing on a phone: the photo, countdown, previous / pause / next, favourite / rotate / block](docs/screenshots/mobile-now.png) | ![Blocked photos with one-tap unblock](docs/screenshots/mobile-blocked.png) | ![Live photo controls: once, loop, bounce, reverse, photo-first or clip-first, timing sliders](docs/screenshots/mobile-live-photos.png) | ![Sign-in page](docs/screenshots/login.png) |
+
+**Collages** get numbered markers on each tile and a key with every photo's
+place, date and camera — tap one to block it or open it in Immich:
+
+![A collage on the dashboard with its numbered key, beside the controls](docs/screenshots/desktop-collage.png)
+
+**Settings** edits `config.yaml` from the browser — a playlist builder, every
+common option as a form, a raw-YAML tab, and *Save & restart*:
+
+![The Settings page with the playlist builder](docs/screenshots/settings.png)
+
+### On the frame
+
+| A collage, as composited for the TV | When Immich can't be reached |
+|---|---|
+| ![A five-photo collage with per-photo date and place captions](docs/screenshots/frame-collage.jpg) | ![The "Can't load photos from Immich — retrying" screen](docs/screenshots/frame-status.jpg) |
+
 ## Why
 
 If you already run Immich, you have a single source of truth for your photos:
@@ -53,11 +84,13 @@ UX picframe got right.
   with KMS/DRM output on the Pi — no local download, no transcode;
   hardware decoding (`hwdec: auto-copy` → the Pi's v4l2m2m decoder)
 - Live / motion photos (iPhone Live Photos, Samsung / Pixel motion
-  photos): the photo shows first, then the clip plays — **once, looped,
-  bounced back and forth ("boomerang"), reversed, or not at all** — with
-  configurable lead-in, run time or repeat count, speed (slow-mo to 4×),
-  a freeze at each turnaround, and whether the photo returns afterwards;
-  all adjustable live from the dashboard
+  photos): photo first then the clip, or the clip first — played **once,
+  looped, bounced back and forth ("boomerang"), reversed, or not at all**
+  — with configurable lead-in, run time or repeat count, speed (slow-mo
+  to 4×), a freeze at each turnaround, and whether the photo returns
+  afterwards; all adjustable live from the dashboard
+- Collages tile 2–12 photos into one slide, with a summary caption on the
+  frame (people, places, years) and each photo's date and place on its tile
 - Never shows the same few photos on repeat: every mode draws fresh
   random samples (Immich's metadata search is fixed-order), hidden
   live-photo companion clips are filtered out, and blocked photos are
@@ -81,7 +114,8 @@ UX picframe got right.
   - **Blocked**: every photo you've blocked, filterable, with one-tap
     (or bulk) unblock that also un-archives it in Immich
   - **Controls**: mode, timing, brightness, screen power, clock, caption
-    fields and collages
+    fields, live-photo style and collages
+  - collages show numbered markers and a key of every photo in them
   - keyboard shortcuts on desktop (← → space F R), light and dark themes
 - **Settings page** (`/config`) edits `config.yaml` from the phone: a
   playlist builder (add / reorder / per-mode options / collage), every
@@ -103,8 +137,9 @@ settings editor, and `immframe doctor` for diagnosis. The frame is
 controlled entirely via HA, HTTP, or the dashboard — there's no on-device
 input (no keyboard, mouse, or touch).
 
-445 unit tests across config, the Immich client, selectors, prefetch
-worker, controller, sessions, the block list, MQTT, HTTP and the doctor.
+481 unit tests across config, the Immich client, selectors, prefetch
+worker, controller, live-photo recipes, collages, sessions, the block
+list, the status screen, MQTT, HTTP and the doctor.
 
 Parked ideas are written up in [docs/ideas/](./docs/ideas/) — e.g.
 [ML orientation detection](./docs/ideas/ml-orientation.md) for photos

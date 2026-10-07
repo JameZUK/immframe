@@ -206,6 +206,8 @@ body[data-view="controls"] #view-controls { display: block; animation: fade .2s 
 }
 .stage-tile.hot .tile-no { background: var(--accent); border-color: transparent; }
 .stage.collage .stage-caption { display: none; }
+/* Tile captions sit top-left in a collage — keep the badge clear of them. */
+.stage.collage .stage-badges { top: auto; bottom: 12px; }
 .key-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .key-item {
   display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 12px;
