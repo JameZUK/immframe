@@ -111,6 +111,7 @@ _STATIC: dict[str, tuple[str, str]] = {
     "/static/login.js": ("login.js", "application/javascript; charset=utf-8"),
     "/static/icon.svg": ("icon.svg", "image/svg+xml"),
     "/favicon.ico": ("icon.svg", "image/svg+xml"),
+    "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
     "/static/app.css": ("app.css", "text/css; charset=utf-8"),
     "/static/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/static/config.js": ("config.js", "application/javascript; charset=utf-8"),
@@ -124,7 +125,7 @@ _FORM_CONTENT_TYPES = frozenset({
 # Reachable without a session: the login page and what it needs.
 _PUBLIC_GET = frozenset({
     "/healthz", "/login", "/static/app.css", "/static/login.js", "/static/icon.svg",
-    "/favicon.ico", "/api/session",
+    "/favicon.ico", "/apple-touch-icon.png", "/api/session",
 })
 _PUBLIC_POST = frozenset({"/api/login", "/api/logout"})
 # HTML pages: an unauthenticated visit redirects to the login form.

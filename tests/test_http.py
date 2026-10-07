@@ -1245,3 +1245,12 @@ def test_state_serialises_collage_tiles():
         assert cur["tiles"][0]["city"] == "Reykjavík" and cur["tiles"][0]["file"] == "IMG_0001.jpg"
         ctrl.current_asset = _asset()
         assert requests.get(f"{base}/api/state", timeout=2.0, auth=_auth()).json()["current_asset"]["tiles"] == []
+
+
+
+def test_icons_are_public():
+    with _server() as (base, _, _):
+        r = requests.get(f"{base}/apple-touch-icon.png", timeout=2.0)
+        assert r.status_code == 200 and r.headers["Content-Type"] == "image/png" and r.content[:4] == b"\x89PNG"
+        r = requests.get(f"{base}/static/icon.svg", timeout=2.0)
+        assert r.status_code == 200 and b"<svg" in r.content

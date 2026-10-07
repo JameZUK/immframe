@@ -1,4 +1,6 @@
-# immframe
+<p align="center"><img src="docs/logo/immframe-128.png" width="96" height="96" alt="immframe logo"></p>
+
+<h1 align="center">immframe</h1>
 
 A picture-frame slideshow that streams photos and videos directly from an
 [Immich](https://immich.app) server. Designed for a Raspberry Pi wired to a
