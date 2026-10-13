@@ -79,22 +79,30 @@ class ImmichClient:
         self._session.headers.setdefault(self.AUTH_HEADER, api_key)
         self._session.headers.setdefault("Accept", "application/json")
         # Ask for uncompressed replies. requests advertises gzip/deflate by
-        # default, and after the Immich 3.2.4 update (photos.jamez.me.uk,
-        # 2026-10-04) every compressed search/thumbnail reply hung until the
-        # read timeout — the frame stayed black. JSON replies are small and
-        # images aren't compressible, so identity costs nothing.
-        self._session.headers["Accept-Encoding"] = "identity"
+        # default, and after an Immich 3.2.4 update every compressed
+        # search/thumbnail reply hung until the read timeout — the frame
+        # stayed black. JSON replies are small and images aren't
+        # compressible, so identity costs nothing. A caller's session that
+        # set its own encoding keeps it.
+        if self._session.headers.get("Accept-Encoding") in (
+            None, requests.utils.default_headers()["Accept-Encoding"],
+        ):
+            self._session.headers["Accept-Encoding"] = "identity"
         # Server version, resolved lazily on the first search and cached.
         # Decides the search-filter dialect (see _search_body).
         self._version: tuple[int, int, int] | None = None
         self._version_lock = threading.Lock()
         # Reachability, for the frame's "can't load photos" screen and the
         # dashboard banner. Only "Immich isn't working" failures count —
-        # timeouts, connection errors, 5xx — not a 404 for one asset.
+        # timeouts, connection errors, 5xx, a rejected key (401) — not a 404
+        # for one asset, nor a 403 for a permission the key may lack on
+        # purpose. Tracked per kind of request ("api" = JSON calls, "media"
+        # = photo downloads), so working searches don't hide failing
+        # downloads and vice versa: a kind is only healthy again once a
+        # request of that kind succeeds.
         self._health_lock = threading.Lock()
         self._last_ok: float | None = None
-        self._failing_since: float | None = None
-        self._last_error: str | None = None
+        self._failing: dict[str, tuple[float, str]] = {}   # kind → (since, last error)
 
     def close(self) -> None:
         if self._owns_session:
@@ -113,27 +121,38 @@ class ImmichClient:
         return self._request("POST", path, json=json, **kw)
 
     # ── Reachability ────────────────────────────────────────────────────
-    def _note_ok(self) -> None:
+    def _note_ok(self, kind: str = "api") -> None:
         with self._health_lock:
             self._last_ok = time.time()
-            self._failing_since = None
-            self._last_error = None
+            self._failing.pop(kind, None)
 
-    def _note_failure(self, err: str) -> None:
+    def _note_failure(self, err: str, kind: str = "api") -> None:
         with self._health_lock:
-            if self._failing_since is None:
-                self._failing_since = time.time()
-            self._last_error = err
+            since = self._failing.get(kind, (time.time(), ""))[0]
+            self._failing[kind] = (since, err)
+
+    def _note_status(self, status: int, kind: str = "api") -> None:
+        """Health bookkeeping for a reply that arrived."""
+        if status >= 500:
+            self._note_failure(f"Immich error {status}", kind)
+        elif status == 401:
+            self._note_failure("Immich rejected the API key (401)", kind)
+        elif status < 400:
+            self._note_ok(kind)
 
     @property
     def health(self) -> dict[str, Any]:
         """{"ok", "failing_since", "last_error", "last_ok"} — ok is False
-        from the first unreachable-type failure until the next success."""
+        from the first unreachable-type failure until a request of the
+        failing kind succeeds again."""
         with self._health_lock:
+            since = min((f[0] for f in self._failing.values()), default=None)
+            # The error of whatever is still failing, longest-failing first.
+            err = min(self._failing.values())[1] if self._failing else None
             return {
-                "ok": self._failing_since is None,
-                "failing_since": self._failing_since,
-                "last_error": self._last_error,
+                "ok": since is None,
+                "failing_since": since,
+                "last_error": err,
                 "last_ok": self._last_ok,
             }
 
@@ -147,15 +166,18 @@ class ImmichClient:
 
     def _request(self, method: str, path: str, **kw: Any) -> Any:
         kw.setdefault("timeout", self._timeout)
+        # Calls with their own headers use the write key: a 403/401 there
+        # (no write key set up, or it lacks a scope) says nothing about
+        # whether the frame can load photos, so they don't touch health.
+        tracked = "headers" not in kw
         try:
             r = self._session.request(method, self._url(path), **kw)
         except requests.RequestException as e:
-            self._note_failure(self._short_error(e))
+            if tracked:
+                self._note_failure(self._short_error(e))
             raise ImmichError(f"{method} {path}: {e}") from e
-        if r.status_code >= 500:
-            self._note_failure(f"Immich error {r.status_code}")
-        elif r.status_code < 400:
-            self._note_ok()
+        if tracked:
+            self._note_status(r.status_code)
         if r.status_code >= 400:
             raise ImmichError(f"{method} {path}: {r.status_code} {r.text[:200]}")
         if not r.content:
@@ -477,8 +499,7 @@ class ImmichClient:
                     self._fallback_to_preview(asset_id, r.status_code, r.url)
                     return self.download_preview(asset_id, dest)   # retry once at new size
                 if r.status_code >= 400:
-                    if r.status_code >= 500:
-                        self._note_failure(f"Immich error {r.status_code}")
+                    self._note_status(r.status_code, "media")
                     raise ImmichError(
                         f"thumbnail {asset_id}: {r.status_code} "
                         f"(final URL: {r.url})"
@@ -489,9 +510,9 @@ class ImmichClient:
                         if chunk:
                             f.write(chunk)
                 os.replace(tmp, dest)
-                self._note_ok()
+                self._note_ok("media")
         except requests.RequestException as e:
-            self._note_failure(self._short_error(e))
+            self._note_failure(self._short_error(e), "media")
             raise ImmichError(f"thumbnail {asset_id}: {e}") from e
 
     def _fallback_to_preview(self, asset_id: str, status: int, final_url: str) -> None:
@@ -651,6 +672,11 @@ _KIND_MAP = {
 STRUCTURED_FILTER_SINCE: tuple[int, int, int] = (3, 2, 0)
 
 
+# Immich rejects a /search/* request whose `size` is over 1000 (400), so
+# callers that over-fetch for variety (count * pages) are capped here.
+SEARCH_MAX_SIZE = 1000
+
+
 def search_body(
     count: int,
     *,
@@ -678,7 +704,7 @@ def search_body(
     archived and locked-folder assets.
     """
     body: dict[str, Any] = {
-        "size": count,
+        "size": max(1, min(int(count), SEARCH_MAX_SIZE)),
         "withExif": True,
         "withPeople": True,
     }

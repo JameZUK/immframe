@@ -11,6 +11,33 @@ def test_lines_when_failing_and_when_just_waiting():
     assert detail == "photos.example.org · not responding for 13 min · Immich didn't answer in time"
     t, _, detail, _ = status_lines("https://photos.example.org", {"failing_since": None}, now=5.0)
     assert t == "Loading photos from Immich" and "waiting for the first photos" in detail
+    t, _, detail, _ = status_lines("https://photos.example.org", {"failing_since": None}, now=5.0, first=False)
+    assert t == "Loading photos from Immich" and "the next photo is taking a while" in detail
+
+
+def test_lines_when_nothing_matches_the_selection():
+    t, sub, detail, hint = status_lines("https://photos.example.org", {"failing_since": None}, empty=True)
+    assert t == "No photos to show" and "nothing matches" in detail and "Immich is back" not in hint
+    # Immich failing wins over an empty answer (a failing selector returns []).
+    t, *_ = status_lines("https://x", {"failing_since": 1.0, "last_error": "boom"}, now=9.0, empty=True)
+    assert t == "Can't load photos from Immich"
+
+
+def test_lines_for_a_rejected_key_point_at_the_key():
+    _, _, detail, hint = status_lines("https://x", {"failing_since": 0.0, "last_error": "Immich rejected the API key (401)"}, now=120.0)
+    assert detail == "x · failing for 2 min · Immich rejected the API key (401)"
+    assert "API key" in hint
+
+
+def test_long_detail_is_trimmed_with_an_ellipsis(tmp_path: Path, monkeypatch):
+    from PIL import ImageDraw
+    drawn = []
+    orig = ImageDraw.ImageDraw.text
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", lambda self, xy, text, **kw: (drawn.append((xy, text)), orig(self, xy, text, **kw))[1])
+    lines = ("t", "s", "x" * 400, "h")
+    assert render(tmp_path / "s.jpg", (320, 180), lines)
+    (x, _), text = next(d for d in drawn if d[1].startswith("xxx"))
+    assert text.endswith("…") and len(text) < 400 and x >= 0
 
 
 def test_describe_duration():

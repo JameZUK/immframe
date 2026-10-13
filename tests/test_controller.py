@@ -862,51 +862,149 @@ def _status_controller(tmp_path, monkeypatch, now):
     import immframe.controller as cm
     c = _controller()
     c._prefetch.cache_dir = tmp_path
+    c._prefetch.selection_empty = False
     c._client.health = {"ok": False, "failing_since": 100.0, "last_error": "Immich didn't answer in time", "last_ok": None}
     clock = {"t": now}
     monkeypatch.setattr(cm.time, "time", lambda: clock["t"])
     return c, clock
 
 
+def _tick(c, v, time_delay=60, fade=4):
+    """One empty-queue loop pass; a status render it starts is finished and
+    put up straight away (the real loop does that on its next pass)."""
+    c._maybe_show_status(v, time_delay, fade)
+    job = c._status_job
+    if job is not None:
+        job.join(5)
+        c._maybe_show_status(v, time_delay, fade)
+
+
 def test_status_screen_after_15s_with_nothing_on_screen(tmp_path, monkeypatch):
     c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
     v = _FakeViewer()
-    c._maybe_show_status(v, 60, 4)                      # starts the wait clock
+    _tick(c, v)                                         # starts the wait clock
     clock["t"] += 10
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     assert v.shown == []
     clock["t"] += 6                                     # 16 s
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     assert len(v.shown) == 1 and Path(v.shown[0]).exists()
     assert c.immich_status["showing_status"] is True
     clock["t"] += 10                                    # not refreshed before 30 s
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     assert len(v.shown) == 1
     first = Path(v.shown[0])
     clock["t"] += 25
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     assert len(v.shown) == 2 and not first.exists()     # refreshed, old file removed
 
 
-def test_status_screen_waits_much_longer_when_a_photo_is_up(tmp_path, monkeypatch):
+def test_status_render_runs_off_the_loop(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    v = _FakeViewer()
+    c._maybe_show_status(v, 60, 4)
+    clock["t"] += 16
+    c._maybe_show_status(v, 60, 4)                      # starts the render, returns at once
+    assert v.shown == [] and c._status_job is not None
+    c._status_job.join(5)
+    c._maybe_show_status(v, 60, 4)                      # next pass puts it up
+    assert len(v.shown) == 1 and c._status_job is None
+
+
+def test_status_waits_much_longer_when_a_photo_is_up(tmp_path, monkeypatch):
     c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
     c._current_asset = _asset()
     v = _FakeViewer()
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     clock["t"] += 60 + 100
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     assert v.shown == []                                # keep the photo for a while
     clock["t"] += 30
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     assert len(v.shown) == 1
+
+
+def test_status_screen_clears_now_showing(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    c._current_asset = _asset()
+    c._current_path = tmp_path / "photo.jpg"
+    v = _FakeViewer()
+    _tick(c, v)
+    clock["t"] += 200
+    _tick(c, v)
+    assert len(v.shown) == 1
+    assert c._current_asset is None and c._current_path is None
 
 
 def test_next_real_slide_clears_the_status(tmp_path, monkeypatch):
     c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
     v = _FakeViewer()
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     clock["t"] += 20
-    c._maybe_show_status(v, 60, 4)
+    _tick(c, v)
     status_file = Path(v.shown[0])
     _show(c, _asset())
     assert not status_file.exists() and c._status_path is None and c._waiting_since is None
+    assert c._status_on_viewer is False
+
+
+def test_status_comes_back_promptly_after_a_direct_video(tmp_path, monkeypatch):
+    """A video played straight through mpv leaves the status slide on the
+    viewer underneath: once it ends with nothing ready, the slide is
+    re-rendered at once instead of sitting there with stale text."""
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    v = _FakeViewer()
+    _tick(c, v)
+    clock["t"] += 20
+    _tick(c, v)
+    assert len(v.shown) == 1
+    c._current_asset = _asset()
+    c._record_shown(c._current_asset, None, on_viewer=False)   # the direct-video path
+    assert c._status_on_viewer is True and c._status_path is None
+    clock["t"] += 90                                    # clip over, queue still empty
+    _tick(c, v)                                         # restarts the wait clock
+    clock["t"] += 1
+    _tick(c, v)
+    assert len(v.shown) == 2                            # not time_delay + 120 s later
+
+
+def test_failed_status_render_backs_off(tmp_path, monkeypatch):
+    import immframe.status_screen as ss
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    calls = []
+    monkeypatch.setattr(ss, "render", lambda *a: calls.append(1) or False)
+    v = _FakeViewer()
+    _tick(c, v)
+    clock["t"] += 16
+    _tick(c, v)
+    for _ in range(5):                                  # every loop pass for a few seconds
+        clock["t"] += 1
+        _tick(c, v)
+    assert v.shown == [] and len(calls) == 1
+    clock["t"] += 30
+    _tick(c, v)
+    assert len(calls) == 2
+
+
+def test_photos_resuming_abandons_a_render_in_flight(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    v = _FakeViewer()
+    c._maybe_show_status(v, 60, 4)
+    clock["t"] += 16
+    c._maybe_show_status(v, 60, 4)
+    job = c._status_job
+    _show(c, _asset())
+    job.join(5)
+    assert c._status_job is None and not job.dest.exists()
+
+
+def test_status_lines_get_the_selection_state(tmp_path, monkeypatch):
+    c, clock = _status_controller(tmp_path, monkeypatch, 1000.0)
+    c._client.health = {"ok": True, "failing_since": None, "last_error": None, "last_ok": 1.0}
+    c._prefetch.selection_empty = True
+    v = _FakeViewer()
+    _tick(c, v)
+    clock["t"] += 16
+    c._maybe_show_status(v, 60, 4)
+    assert c._status_job.lines[0] == "No photos to show"
+    c._status_job.join(5)

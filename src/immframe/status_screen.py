@@ -5,7 +5,7 @@ normal viewer path, so it crossfades in and out like a photo:
 
     Can't load photos from Immich
     Retrying…
-    photos.jamez.me.uk · not responding for 12 min · Immich didn't answer in time
+    photos.example.org · not responding for 12 min · Immich didn't answer in time
     The frame will carry on by itself as soon as Immich is back.
 """
 from __future__ import annotations
@@ -33,21 +33,36 @@ def describe_duration(seconds: float) -> str:
     return f"{s / 3600:.1f} h"
 
 
-def status_lines(immich_url: str, health: dict, *, now: float | None = None) -> tuple[str, str, str, str]:
-    """(title, subtitle, detail, hint) for the screen and the dashboard."""
+def status_lines(
+    immich_url: str, health: dict, *, now: float | None = None,
+    first: bool = True, empty: bool = False,
+) -> tuple[str, str, str, str]:
+    """(title, subtitle, detail, hint) for the screen.
+
+    Immich failing wins; otherwise Immich is fine and either the selection
+    matched nothing (`empty`) or photos are still downloading — `first`
+    when none has been shown since start-up."""
     now = time.time() if now is None else now
     host = urlsplit(immich_url).hostname or immich_url
     since = health.get("failing_since")
     err = health.get("last_error")
     if since is not None:
-        detail = f"{host} · not responding for {describe_duration(now - since)}"
+        verb = "failing" if err and "API key" in err else "not responding"
+        detail = f"{host} · {verb} for {describe_duration(now - since)}"
         if err:
             detail += f" · {err}"
-        title = "Can't load photos from Immich"
-    else:
-        detail = f"{host} · waiting for the first photos"
-        title = "Loading photos from Immich"
-    return title, "Retrying…", detail, "The frame will carry on by itself as soon as Immich is back."
+        if err and "API key" in err:
+            hint = "Check the frame's Immich API key — it carries on by itself once Immich accepts it."
+        else:
+            hint = "The frame will carry on by itself as soon as Immich is back."
+        return "Can't load photos from Immich", "Retrying…", detail, hint
+    if empty:
+        return ("No photos to show", "Checking again…",
+                f"{host} · nothing matches the current selection",
+                "Pick a different selection on the dashboard — new matches are picked up by themselves.")
+    detail = f"{host} · " + ("waiting for the first photos" if first else "the next photo is taking a while")
+    return ("Loading photos from Immich", "Please wait…", detail,
+            "The next photo will appear as soon as it has downloaded.")
 
 
 def render(dest: Path, size: tuple[int, int], lines: tuple[str, str, str, str]) -> bool:
@@ -57,11 +72,12 @@ def render(dest: Path, size: tuple[int, int], lines: tuple[str, str, str, str]) 
     except ImportError:                                # pragma: no cover
         return False
     w, h = max(320, int(size[0])), max(180, int(size[1]))
-    img = Image.new("RGB", (w, h), BG_TOP)
+    # Soft vertical gradient: one column, stretched (fast even at 4K).
+    col = Image.new("RGB", (1, h))
+    col.putdata([tuple(round(a + (b - a) * y / max(1, h - 1)) for a, b in zip(BG_TOP, BG_BOTTOM))
+                 for y in range(h)])
+    img = col.resize((w, h), Image.NEAREST)
     draw = ImageDraw.Draw(img)
-    for y in range(h):                                 # soft vertical gradient
-        t = y / max(1, h - 1)
-        draw.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
 
     def font(name: str, px: int):
         try:
@@ -86,13 +102,11 @@ def render(dest: Path, size: tuple[int, int], lines: tuple[str, str, str, str]) 
         draw.ellipse([cx + dx - rr, cy - rr, cx + dx + rr, cy + rr], fill=col)
 
     def centred(text: str, y: int, f, fill) -> int:
+        if draw.textlength(text, font=f) > w * 0.9:    # trim overly long details
+            while len(text) > 1 and draw.textlength(text + "…", font=f) > w * 0.9:
+                text = text[:-1]
+            text = text.rstrip() + "…"
         tw = draw.textlength(text, font=f)
-        while tw > w * 0.9 and len(text) > 4:          # trim overly long details
-            text = text[:-2]
-            tw = draw.textlength(text + "…", font=f)
-            if tw <= w * 0.9:
-                text += "…"
-                break
         draw.text(((w - tw) / 2, y), text, font=f, fill=fill)
         return y + round(f.size * 1.5) if hasattr(f, "size") else y + 20
 

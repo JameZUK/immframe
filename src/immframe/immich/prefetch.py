@@ -100,6 +100,9 @@ class PrefetchWorker:
         self._queue: queue.Queue[QueueItem] = queue.Queue(maxsize=queue_size)
         self._stop_evt = threading.Event()
         self._empty_backoff_s = empty_backoff_s
+        # True while the selector's last answer was an empty batch (Immich
+        # answered, nothing matched) — for the frame's status screen.
+        self._selection_empty = False
         self._tmp_dir = Path(tempfile.mkdtemp(prefix="immframe-", dir=_cache_parent(cache_dir)))
         log.info("prefetch cache: %s", self._tmp_dir)
         self._thread: threading.Thread | None = None
@@ -213,6 +216,10 @@ class PrefetchWorker:
                 return per_entry
         return None
 
+    @property
+    def selection_empty(self) -> bool:
+        return self._selection_empty
+
     def _run(self) -> None:
         while not self._stop_evt.is_set():
             selector, gen, collage = self._snapshot()
@@ -235,8 +242,10 @@ class PrefetchWorker:
                 batch = selector.next_batch(self._queue.maxsize)
             except Exception as e:
                 log.exception("selector.next_batch raised: %s", e)
-                batch = []
-            batch = [a for a in batch if not self._is_hidden(a.id)]
+                batch = None
+            if batch is not None:
+                batch = [a for a in batch if not self._is_hidden(a.id)]
+                self._selection_empty = not batch
 
             if not batch:
                 self._stop_evt.wait(self._empty_backoff_s)
@@ -308,6 +317,7 @@ class PrefetchWorker:
         except Exception as e:
             log.exception("selector.next_batch raised: %s", e)
             return None
+        self._selection_empty = not assets
         if not assets:
             return None
 

@@ -169,6 +169,29 @@ def _iclamp(value: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
+class _StatusJob(threading.Thread):
+    """Renders the status slide off the render thread (a 4K JPEG encode
+    stalls the display on a Pi). If photos come back while it runs, it is
+    abandoned and deletes its own file."""
+
+    def __init__(self, dest: Path, size: tuple[int, int], lines: tuple[str, str, str, str]) -> None:
+        super().__init__(name="status-screen", daemon=True)
+        self.dest, self.size, self.lines = dest, size, lines
+        self.ok = False
+        self.abandoned = False
+
+    def run(self) -> None:
+        from .status_screen import render
+        self.ok = render(self.dest, self.size, self.lines)
+        if self.abandoned:
+            self.dest.unlink(missing_ok=True)
+
+    def abandon(self) -> None:
+        # Flag first, then delete: whichever side looks last removes the file.
+        self.abandoned = True
+        self.dest.unlink(missing_ok=True)
+
+
 def _status_asset() -> Asset:
     """Placeholder asset for the status slide (no overlay text)."""
     from .immich.models import GeoInfo
@@ -241,7 +264,10 @@ class Controller:
         # "Can't load photos" screen (see _maybe_show_status).
         self._waiting_since: float | None = None
         self._status_shown_at: float | None = None
-        self._status_path: Path | None = None
+        self._status_next_at = 0.0                      # earliest next render
+        self._status_path: Path | None = None           # file behind the status slide
+        self._status_on_viewer = False                  # the viewer's last slide is the status
+        self._status_job: _StatusJob | None = None      # render in progress
         # Local file backing the current slide (the prefetched preview, or a
         # composited collage). Served by the HTTP /api/current_image endpoint —
         # collages aren't real Immich assets so the image proxy can't fetch them.
@@ -416,7 +442,11 @@ class Controller:
             self._force_next_evt.clear()
 
             if advance:
-                item = self._take_item(timeout=1.0)
+                # Waiting on the queue blocks drawing. Normally a second is
+                # fine (a photo just sits there), but the status slide has
+                # to crossfade and refresh smoothly, so poll briefly then.
+                waiting_on_status = self._status_on_viewer or self._status_job is not None
+                item = self._take_item(timeout=0.02 if waiting_on_status else 1.0)
                 if item is None:
                     self._maybe_show_status(viewer, time_delay, fade_time)
                     # Backoff: nothing ready, just keep drawing current
@@ -444,7 +474,7 @@ class Controller:
                 # Video with no poster (download failed or poster disabled):
                 # play directly via MPV, no pi3d render.
                 if is_video and not show_poster:
-                    self._record_shown(asset, None)
+                    self._record_shown(asset, None, on_viewer=False)
                     self._play_video(asset)
                     next_tm = time.time() + time_delay
                     self._next_change_at = next_tm
@@ -552,38 +582,67 @@ class Controller:
         """Called when a slide is due but nothing is ready. Instead of a black
         screen (first boot) or a photo frozen for ages (Immich died mid-run),
         put up a status slide saying what's wrong; it's refreshed every 30 s
-        and the next real photo replaces it."""
+        and the next real photo replaces it. Rendering happens on a worker
+        thread; the slide goes up on the first call after it finishes."""
         now = time.time()
+        job = self._status_job
+        if job is not None:
+            if not job.is_alive():
+                self._status_job = None
+                self._put_up_status(viewer, job, time_delay, fade_time, now)
+            return
         if self._waiting_since is None:
             self._waiting_since = now
             return
         waited = now - self._waiting_since
-        threshold = self.STATUS_FIRST_S if self._current_asset is None else time_delay + self.STATUS_STALE_S
-        if waited < threshold:
+        if self._status_on_viewer:
+            threshold = 0.0                             # it's still up (e.g. under a video): refresh it
+        elif self._current_asset is None:
+            threshold = self.STATUS_FIRST_S
+        else:
+            threshold = time_delay + self.STATUS_STALE_S
+        if waited < threshold or now < self._status_next_at:
             return
-        if self._status_shown_at is not None and now - self._status_shown_at < self.STATUS_REFRESH_S:
-            return
-        from .status_screen import render, status_lines
-        lines = status_lines(self._config.immich.url, self._client.health, now=now)
-        dest = self._prefetch.cache_dir / f"status-{int(now)}.jpg"
+        self._status_next_at = now + self.STATUS_REFRESH_S   # also the retry delay after a failure
+        from .status_screen import status_lines
+        lines = status_lines(
+            self._config.immich.url, self._client.health, now=now,
+            first=self._slide_started_at is None,
+            empty=self._prefetch.selection_empty,
+        )
+        dest = self._prefetch.cache_dir / f"status-{int(now * 1000)}.jpg"
         size = (getattr(viewer, "display_width", 1920), getattr(viewer, "display_height", 1080))
-        if not render(dest, size, lines):
+        self._status_job = _StatusJob(dest, size, lines)
+        self._status_job.start()
+
+    def _put_up_status(self, viewer, job: "_StatusJob", time_delay: float, fade_time: float, now: float) -> None:
+        if not job.ok:
+            log.warning("status screen render failed — trying again in %.0f s", self.STATUS_REFRESH_S)
+            job.dest.unlink(missing_ok=True)
             return
         if self._status_shown_at is None:
-            log.warning("no photos for %.0f s — showing the status screen (%s)", waited, lines[2])
+            waited = now - (self._waiting_since or now)
+            log.warning("no photos for %.0f s — showing the status screen (%s)", waited, job.lines[2])
         try:
             viewer.slideshow_is_running(
-                [Pic(str(dest), _status_asset(), ocr_text=None), None],
+                [Pic(str(job.dest), _status_asset(), ocr_text=None), None],
                 time_delay=time_delay, fade_time=fade_time, paused=self._paused,
             )
         except Exception as e:                          # never let the status screen kill the loop
             log.warning("status screen failed: %s", e)
-            dest.unlink(missing_ok=True)
+            job.dest.unlink(missing_ok=True)
             return
         if self._status_path is not None:
             self._status_path.unlink(missing_ok=True)
-        self._status_path = dest
+        self._status_path = job.dest
         self._status_shown_at = now
+        self._status_on_viewer = True
+        # The photo that was up is gone from the screen: the dashboard
+        # shouldn't offer it as "Now showing" (or act on it).
+        self._current_asset = None
+        self._pair_asset = None
+        self._current_path = None
+        self._publish_state()
 
     @property
     def immich_status(self) -> dict:
@@ -907,17 +966,25 @@ class Controller:
     # ── History / previous / timeline ───────────────────────────────────
     HISTORY_MAX = 100
 
-    def _record_shown(self, asset: Asset, pair: Asset | None) -> None:
+    def _record_shown(self, asset: Asset, pair: Asset | None, *, on_viewer: bool = True) -> None:
         """Called by the loop as each slide goes up. A replay moves the
-        history cursor back to that entry instead of adding a new one."""
+        history cursor back to that entry instead of adding a new one.
+        `on_viewer` is False for a video played straight through mpv: the
+        viewer still holds its previous slide (maybe the status screen)."""
         now = time.time()
         self._slide_started_at = now
         self._waiting_since = None                      # photos are flowing again
+        self._status_next_at = 0.0
+        if self._status_job is not None:
+            self._status_job.abandon()
+            self._status_job = None
         if self._status_path is not None:
-            self._status_path.unlink(missing_ok=True)
+            self._status_path.unlink(missing_ok=True)   # the texture stays loaded
             self._status_path = None
             self._status_shown_at = None
             log.info("photos are loading again — status screen cleared")
+        if on_viewer:
+            self._status_on_viewer = False
         with self._hist_lock:
             idx = self._replay_index
             if idx is not None and 0 <= idx < len(self._history) \

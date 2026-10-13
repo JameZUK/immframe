@@ -774,7 +774,7 @@ def test_rotate_permission_error_surfaces():
 
 @responses.activate
 def test_requests_ask_for_uncompressed_replies():
-    """Regression: compressed replies hung behind photos.jamez.me.uk after
+    """Regression: compressed replies hung from the Immich server after
     the Immich 3.2.4 update, so the client must send Accept-Encoding: identity."""
     seen = {}
 
@@ -814,3 +814,58 @@ def test_health_ignores_client_errors():
     with pytest.raises(ImmichError):
         c.album_assets("x")
     assert c.health["ok"] is True
+
+
+@responses.activate
+def test_health_counts_a_rejected_key_but_not_a_missing_scope():
+    c = ImmichClient(BASE, "k")
+    responses.add(responses.GET, f"{BASE}/api/albums/x", status=403, json={"message": "Missing permission"})
+    with pytest.raises(ImmichError):
+        c.album_assets("x")
+    assert c.health["ok"] is True
+    responses.add(responses.POST, f"{BASE}/api/search/random", status=401, json={"message": "Invalid API key"})
+    with pytest.raises(ImmichError):
+        c.random_assets(1)
+    assert c.health["ok"] is False and c.health["last_error"] == "Immich rejected the API key (401)"
+
+
+@responses.activate
+def test_health_ignores_write_key_calls():
+    c = ImmichClient(BASE, "k", write_api_key="w")
+    responses.add(responses.PUT, f"{BASE}/api/assets/a1", status=401, json={"message": "Invalid API key"})
+    with pytest.raises(ImmichError):
+        c.update_asset("a1", favorite=True)
+    assert c.health["ok"] is True
+
+
+@responses.activate
+def test_health_working_searches_dont_hide_failing_downloads(tmp_path):
+    c = ImmichClient(BASE, "k")
+    responses.add(responses.GET, f"{BASE}/api/assets/a1/thumbnail", status=502)
+    responses.add(responses.POST, f"{BASE}/api/search/random", json=[])
+    with pytest.raises(ImmichError):
+        c.download_preview("a1", tmp_path / "a1.jpg")
+    since = c.health["failing_since"]
+    c.random_assets(1)                                  # searches still work
+    h = c.health
+    assert h["ok"] is False and h["failing_since"] == since and h["last_error"] == "Immich error 502"
+    responses.replace(responses.GET, f"{BASE}/api/assets/a1/thumbnail", body=b"jpeg", content_type="image/jpeg")
+    c.download_preview("a1", tmp_path / "a1.jpg")
+    assert c.health["ok"] is True and c.health["last_error"] is None
+
+
+def test_search_size_is_capped_at_immichs_limit():
+    from immframe.immich.client import SEARCH_MAX_SIZE, search_body
+    assert search_body(25 * 50, structured=True)["size"] == SEARCH_MAX_SIZE == 1000
+    assert search_body(20, structured=False)["size"] == 20
+
+
+def test_a_callers_own_accept_encoding_is_kept():
+    import requests as _rq
+    s = _rq.Session()
+    s.headers["Accept-Encoding"] = "br"
+    ImmichClient(BASE, "k", session=s)
+    assert s.headers["Accept-Encoding"] == "br"
+    s2 = _rq.Session()                                  # requests' own default → identity
+    ImmichClient(BASE, "k", session=s2)
+    assert s2.headers["Accept-Encoding"] == "identity"
