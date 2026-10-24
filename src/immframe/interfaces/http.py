@@ -901,7 +901,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _hidden_obj(e: dict) -> dict:
-        return {k: e.get(k) for k in ("id", "file", "kind", "at", "archived", "companions")}
+        return {k: e.get(k) for k in ("id", "file", "kind", "at", "archived", "companions", "burst_of")}
 
     def _image(self, asset_id: str, size: str = "preview") -> None:
         # Belt and braces — the path regex already enforces this, but double-check.

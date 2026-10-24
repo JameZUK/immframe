@@ -1185,9 +1185,12 @@ def test_hide_by_id_hidden_list_and_unhide():
         r = requests.post(f"{base}/api/hide", json={"id": uid}, timeout=2.0, auth=_auth())
         assert r.status_code == 200 and ctrl.hidden_by_id == [uid]
         assert requests.post(f"{base}/api/hide", json={"id": "a/b"}, timeout=2.0, auth=_auth()).status_code == 400
-        ctrl.blocked = [{"id": uid, "file": "x.jpg", "kind": "IMAGE", "at": 1.0, "archived": True, "companions": []}]
+        ctrl.blocked = [{"id": uid, "file": "x.jpg", "kind": "IMAGE", "at": 1.0, "archived": True, "companions": []},
+                        {"id": "b1", "file": "x-1.jpg", "kind": "IMAGE", "at": 1.0, "archived": False,
+                         "companions": [], "burst_of": uid}]
         body = requests.get(f"{base}/api/hidden", timeout=2.0, auth=_auth()).json()
-        assert body["hidden"][0]["file"] == "x.jpg"
+        assert body["hidden"][0]["file"] == "x.jpg" and body["hidden"][0]["burst_of"] is None
+        assert body["hidden"][1]["burst_of"] == uid               # the dashboard's "same burst as …"
         r = requests.post(f"{base}/api/unhide", json={"ids": [uid]}, timeout=2.0, auth=_auth())
         assert r.status_code == 200 and r.json()["results"][0]["unhidden"] and ctrl.unhidden == [uid]
         assert requests.post(f"{base}/api/unhide", json={"ids": []}, timeout=2.0, auth=_auth()).status_code == 400
