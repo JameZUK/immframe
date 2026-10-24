@@ -569,7 +569,12 @@ function renderBlocked() {
         on: { click: ev => { ev.stopPropagation(); toggleSelect(b.id); } },
       }, icon("i-check")),
     );
-    const when = [b.at ? `Blocked ${ago(b.at)}` : "Blocked", b.archived ? "archived in Immich" : null].filter(Boolean).join(" · ");
+    const burstOf = b.burst_of ? blockedData.find(x => x.id === b.burst_of) : null;
+    const when = [
+      b.at ? `Blocked ${ago(b.at)}` : "Blocked",
+      b.burst_of ? `same burst as ${burstOf && burstOf.file ? burstOf.file : "a blocked photo"}` : null,
+      b.archived ? "archived in Immich" : null,
+    ].filter(Boolean).join(" · ");
     card.append(
       thumb,
       el("div", { class: "info" },
@@ -594,7 +599,11 @@ async function unblock(ids) {
   if (!r) return;
   const errs = (r.results || []).filter(x => x.error);
   if (errs.length) toast(errs[0].error, "warn");
-  else toast(ids.length === 1 ? `Unblocked ${names[0] || "photo"} — it can come up again` : `Unblocked ${ids.length} photos`);
+  else {
+    const extra = (r.results || []).filter(x => x.unhidden && !ids.includes(x.id)).length;   // its burst
+    const what = ids.length === 1 ? `${names[0] || "photo"}` : `${ids.length} photos`;
+    toast(extra ? `Unblocked ${what} and ${extra} more from the same burst` : ids.length === 1 ? `Unblocked ${what} — it can come up again` : `Unblocked ${what}`);
+  }
   ids.forEach(id => selected.delete(id));
   await Promise.all([loadBlocked(), refresh()]);
 }
@@ -603,7 +612,8 @@ async function block(asset) {
   const r = await attempt(() => post("/api/hide", asset ? { id: asset.id } : undefined));
   if (!r) return;
   const id = r.hidden;
-  const msg = r.archived ? "Blocked and archived in Immich" : "Blocked on the frame";
+  const base = r.archived ? "Blocked and archived in Immich" : "Blocked on the frame";
+  const msg = r.burst ? `${base}, plus ${r.burst} shot${r.burst === 1 ? "" : "s"} from the same burst` : base;
   toast(msg, r.archived ? "ok" : "warn", { label: "Undo", fn: () => unblock([id]) });
   timelineKey = null;
   await refresh();

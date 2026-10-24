@@ -24,6 +24,8 @@ selection:
   playlist: []                             # used when default_mode = playlist; see docs/configuration.md
   prefetch_count: 5                        # queue depth ahead of slideshow
   cache_dir: ""                            # prefetch cache; "" = /dev/shm (RAM, no SD-card wear) if present
+  burst_window_s: 3                        # shots this close (same size) are one burst: blocking one blocks all; 0 = off
+  burst_cooldown_min: 60                   # after showing a burst shot, skip its burst-mates this long; 0 = off
 
 video:
   enabled: true

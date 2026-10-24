@@ -116,6 +116,13 @@ class SelectionConfig:
     cache_dir: str = ""
     # "Never show again" list; "" = $XDG_STATE_HOME/immframe/hidden.json
     hidden_file: str = ""
+    # Burst shots (see bursts.py): same size, taken within this many seconds
+    # of each other, count as one photo — blocking one blocks them all, and
+    # 0 turns burst handling off.
+    burst_window_s: float = 3.0
+    # After a shot from a burst is shown, skip its burst-mates for this many
+    # minutes (0 = off), so one moment doesn't fill the slideshow.
+    burst_cooldown_min: float = 60.0
 
 
 @dataclass
@@ -345,6 +352,8 @@ class Config:
             prefetch_count=max(1, int(sel_raw.get("prefetch_count", 5))),
             cache_dir=str(sel_raw.get("cache_dir", "") or ""),
             hidden_file=str(sel_raw.get("hidden_file", "") or ""),
+            burst_window_s=max(0.0, float(sel_raw.get("burst_window_s", 3.0))),
+            burst_cooldown_min=max(0.0, float(sel_raw.get("burst_cooldown_min", 60.0))),
         )
         if selection.default_mode not in SELECTION_MODES:
             raise ValueError(

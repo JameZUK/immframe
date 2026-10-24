@@ -405,13 +405,77 @@ def test_hide_current_adds_to_list_archives_and_advances(tmp_path):
     c = _controller_with_hidden(tmp_path)
     c._current_asset = _asset(live="11111111-2222-3333-4444-555555555555")
     out = c.hide_current()
-    assert out == {"hidden": c._current_asset.id, "archived": True, "error": None}
+    assert out == {"hidden": c._current_asset.id, "archived": True, "error": None, "burst": 0}
     assert c._current_asset.id in c._hidden
     assert "11111111-2222-3333-4444-555555555555" in c._hidden       # the motion clip too
     c._client.update_asset.assert_called_once_with(c._current_asset.id, visibility="archive")
     assert c._force_next_evt.is_set()
     assert c.hidden_count == 1                                       # photo + clip = one block
     assert c.hidden_entries()[0]["companions"] == ["11111111-2222-3333-4444-555555555555"]
+
+
+def _shot(aid, dt):
+    from dataclasses import replace
+    from datetime import datetime, timedelta, timezone
+    return replace(_asset(aid), taken_at=datetime(2021, 6, 15, 17, 20, 4, tzinfo=timezone.utc) + timedelta(seconds=dt))
+
+
+def test_hide_blocks_the_whole_burst(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _shot("b0", 0)
+    c._client.burst_mates.return_value = [_shot("b1", 1), _shot("b2", -1.5)]
+    out = c.hide_current()
+    assert out["burst"] == 2 and out["archived"] is True
+    assert {"b0", "b1", "b2"} <= {e["id"] for e in c.hidden_entries()}
+    by_id = {e["id"]: e for e in c.hidden_entries()}
+    assert by_id["b1"]["burst_of"] == "b0" and by_id["b0"]["burst_of"] is None
+    assert c._client.update_asset.call_count == 3              # all archived in Immich
+    assert c._force_next_evt.is_set()
+
+
+def test_burst_archive_stops_at_the_first_refusal(tmp_path):
+    from immframe.immich.client import ImmichError
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _shot("b0", 0)
+    c._client.burst_mates.return_value = [_shot("b1", 1), _shot("b2", 1)]
+    c._client.update_asset.side_effect = ImmichError("403 asset.update")
+    out = c.hide_current()
+    assert out["archived"] is False and "403" in out["error"] and out["burst"] == 2
+    assert c._client.update_asset.call_count == 1
+    assert "b2" in c._hidden                                    # blocked locally regardless
+
+
+def test_burst_lookup_failure_still_blocks_the_photo(tmp_path):
+    from immframe.immich.client import ImmichError
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _shot("b0", 0)
+    c._client.burst_mates.side_effect = ImmichError("timeout")
+    out = c.hide_current()
+    assert out["burst"] == 0 and "b0" in c._hidden
+    assert c._hidden.needs_burst_check() == ["b0"]              # retried at the next start
+
+
+def test_unblocking_a_photo_unblocks_its_burst(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    c._current_asset = _shot("b0", 0)
+    c._client.burst_mates.return_value = [_shot("b1", 1), _shot("b2", 1)]
+    c.hide_current()
+    res = c.unhide(["b1"])                                      # one burst-mate alone
+    assert [r["id"] for r in res] == ["b1"] and "b2" in c._hidden
+    res = c.unhide(["b0"])
+    assert {r["id"] for r in res} == {"b0", "b2"} and len(c._hidden) == 0
+
+
+def test_old_blocks_get_their_bursts_blocked_once(tmp_path):
+    c = _controller_with_hidden(tmp_path)
+    c._hidden.add("old", details={"file": "old.jpg", "kind": "IMAGE"})
+    c._client.get_asset.return_value = _shot("old", 0)
+    c._client.burst_mates.return_value = [_shot("m1", 1)]
+    c._block_old_bursts()
+    assert "m1" in c._hidden and c._hidden.details("m1")["burst_of"] == "old"
+    c._client.burst_mates.reset_mock()
+    c._block_old_bursts()
+    c._client.burst_mates.assert_not_called()
 
 
 def test_hide_current_survives_immich_refusal(tmp_path):
@@ -502,6 +566,14 @@ def test_pair_for_pairs_two_portraits():
     c._prefetch.next.return_value = second
     assert c._pair_for(_item("p1")) is second
     assert c._pending_item is None
+
+
+def test_pair_for_skips_a_second_portrait_blocked_after_queueing():
+    c = _controller()
+    blocked, ok = _item("p2"), _item("p3")
+    c._hidden.add("p2")
+    c._prefetch.next.side_effect = [blocked, ok]
+    assert c._pair_for(_item("p1")) is ok
 
 
 def test_pair_for_holds_back_non_portrait_as_next_slide():

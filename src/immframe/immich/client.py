@@ -16,7 +16,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -364,6 +364,30 @@ class ImmichClient:
         if not isinstance(data, list):
             raise ImmichError("/memories: expected list")
         return [m for m in data if isinstance(m, dict)]
+
+    def get_asset(self, asset_id: str) -> Asset:
+        """GET /assets/{id} — one asset's details (EXIF included)."""
+        data = self._get(f"/assets/{asset_id}")
+        if not isinstance(data, dict):
+            raise ImmichError(f"/assets/{asset_id}: expected object")
+        return _to_asset(data)
+
+    def burst_mates(self, asset: Asset, window_s: float) -> list[Asset]:
+        """The other shots of `asset`'s burst (see bursts.same_burst): same
+        kind and size, taken within `window_s` seconds. [] without a
+        capture time or with the window off."""
+        from ..bursts import same_burst
+        if window_s <= 0 or asset.taken_at is None:
+            return []
+        # Search in real UTC: the takenAfter/Before filters don't use the
+        # wall-clock `taken_at`, which is hours off for photos taken outside
+        # UTC (an hour in a UK summer). Without it, widen by a day's offsets.
+        if asset.taken_utc is not None:
+            when, span = asset.taken_utc, timedelta(seconds=window_s)
+        else:
+            when, span = asset.taken_at, timedelta(seconds=window_s, hours=14)
+        found = self.search_metadata(taken_after=when - span, taken_before=when + span, count=200)
+        return [a for a in found if same_burst(asset, a, window_s)]
 
     def get_ocr(self, asset_id: str) -> list[str]:
         """GET /assets/{id}/ocr — returns the visible text strings found in
@@ -819,6 +843,7 @@ def _to_asset(d: dict[str, Any]) -> Asset:
         width=int(d.get("width") or 0),
         height=int(d.get("height") or 0),
         taken_at=_parse_dt(d.get("localDateTime") or d.get("fileCreatedAt")),
+        taken_utc=_parse_dt(d.get("fileCreatedAt")),
         geo=GeoInfo(
             latitude=_to_float(exif.get("latitude")),
             longitude=_to_float(exif.get("longitude")),

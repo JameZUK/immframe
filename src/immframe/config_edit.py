@@ -66,6 +66,10 @@ SCHEMA: list[dict[str, Any]] = [
         {"path": "selection.smart_query", "label": "Smart query", "type": "str"},
         {"path": "selection.people_ids", "label": "People IDs", "type": "list", "help": "Empty = rotate everyone named."},
         {"path": "selection.prefetch_count", "label": "Prefetch depth", "type": "int"},
+        {"path": "selection.burst_window_s", "label": "Burst window (s)", "type": "float",
+         "help": "Same-size shots this close are one burst: blocking one blocks them all. 0 = off."},
+        {"path": "selection.burst_cooldown_min", "label": "Burst cooldown (min)", "type": "float",
+         "help": "After a burst shot is shown, skip the rest of that burst this long. 0 = off."},
     ]},
     {"section": "viewer", "title": "Display", "fields": [
         {"path": "viewer.time_delay", "label": "Seconds per slide", "type": "float"},

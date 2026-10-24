@@ -188,6 +188,14 @@ selection:
     assert cfg.selection.prefetch_count == 1
 
 
+def test_burst_settings_default_and_override(tmp_path: Path):
+    base = "immich:\n  url: https://immich.example\n  api_key: k\n"
+    cfg = Config.load(_write(tmp_path, "a.yaml", base))
+    assert cfg.selection.burst_window_s == 3.0 and cfg.selection.burst_cooldown_min == 60.0
+    cfg = Config.load(_write(tmp_path, "b.yaml", base + "selection:\n  burst_window_s: 0\n  burst_cooldown_min: -5\n"))
+    assert cfg.selection.burst_window_s == 0.0 and cfg.selection.burst_cooldown_min == 0.0
+
+
 def test_http_inline_credentials(tmp_path: Path):
     cfg_yaml = _write(
         tmp_path,

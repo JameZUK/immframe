@@ -869,3 +869,31 @@ def test_a_callers_own_accept_encoding_is_kept():
     s2 = _rq.Session()                                  # requests' own default → identity
     ImmichClient(BASE, "k", session=s2)
     assert s2.headers["Accept-Encoding"] == "identity"
+
+
+@responses.activate
+def test_get_asset_and_burst_mates():
+    import json as _json
+    def shot(aid, ts, w=4608, h=2304):
+        d = _asset_json(aid)
+        local = ts.replace("T17:", "T18:").rstrip("Z")         # BST: wall clock = UTC + 1 h
+        d.update(width=w, height=h, fileCreatedAt=ts, localDateTime=local)
+        d["exifInfo"] = dict(d["exifInfo"], dateTimeOriginal=ts, exifImageWidth=w, exifImageHeight=h)
+        return d
+    responses.add(responses.GET, f"{BASE}/api/assets/b0", json=shot("b0", "2021-06-15T17:20:04.000Z"))
+    found = [shot("b0", "2021-06-15T17:20:04.000Z"), shot("b1", "2021-06-15T17:20:05.000Z"),
+             shot("b2", "2021-06-15T17:20:02.600Z"), shot("cam", "2021-06-15T17:20:05.000Z", 4000, 3008)]
+    seen = {}
+    def cb(request):
+        seen["body"] = _json.loads(request.body)
+        return (200, {"Content-Type": "application/json"},
+                _json.dumps({"assets": {"items": found, "count": len(found), "nextPage": None}}))
+    responses.add_callback(responses.POST, f"{BASE}/api/search/metadata", callback=cb)
+    c = ImmichClient(BASE, "k")
+    a = c.get_asset("b0")
+    assert a.id == "b0" and a.taken_at.hour == 18 and a.taken_utc.hour == 17
+    mates = c.burst_mates(a, 2.0)
+    assert sorted(m.id for m in mates) == ["b1", "b2"]        # not itself, not the other camera
+    body = _json.dumps(seen["body"])                           # searched in UTC, not wall-clock time
+    assert "17:20:02" in body and "17:20:06" in body and "18:20" not in body
+    assert c.burst_mates(a, 0) == []

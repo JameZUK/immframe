@@ -21,6 +21,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from .bursts import BurstFilter
 from .collage import is_collage_id
 from .config import SCENE_SOURCES, SELECTION_MODES, Config, SelectionMode
 from .hidden import HiddenList
@@ -310,6 +311,10 @@ class Controller:
         # Live-photo playback style — seeded from config, tunable at runtime.
         self._live = live_settings_from(config.video).validated()
 
+        sel = config.selection
+        self._burst_window_s = sel.burst_window_s
+        self._bursts = BurstFilter(sel.burst_window_s, sel.burst_cooldown_min * 60)
+
         # Build initial selector
         self._selector: AssetSelector = self._build_selector(self._selection_mode)
         self._prefetch = PrefetchWorker(
@@ -328,6 +333,7 @@ class Controller:
             collage=replace(self._collage),
             cache_dir=config.selection.cache_dir or None,
             is_hidden=self._hidden.__contains__,
+            bursts=self._bursts,
         )
 
         # Lazily constructed in start() so module import doesn't pull pi3d/mpv
@@ -381,6 +387,9 @@ class Controller:
         )
 
         self._prefetch.start()
+        # Blocks made before burst handling: block the rest of their bursts
+        # too (once each; a lookup that fails is retried next start).
+        threading.Thread(target=self._block_old_bursts, name="burst-check", daemon=True).start()
 
         if self._config.control.mqtt.enabled:
             try:
@@ -702,6 +711,10 @@ class Controller:
         if not self._pairable(item):
             return None
         second = self._prefetch.next(timeout=0.5)
+        while second is not None and self._blocked(second):   # blocked after it was queued
+            if second[0] is not None:
+                second[0].unlink(missing_ok=True)
+            second = self._prefetch.next(timeout=0.5)
         if second is None:
             return None
         if self._pairable(second):
@@ -902,26 +915,67 @@ class Controller:
         details = {"file": asset.original_file_name, "kind": asset.kind.value} if asset is not None else {}
         self._hidden.add(asset_id, *companions, details=details)
         log.info("blocked: %s (%s)", asset_id, details.get("file") or "?")
-        archived, error = False, None
-        try:
-            self._client.update_asset(asset_id, visibility="archive")
-            archived = True
-            self._hidden.annotate(asset_id, archived=True)
-            log.info("archived in Immich: %s", asset_id)
-        except ImmichError as e:
-            error = str(e)
-            log.warning("archive in Immich failed (blocked locally anyway): %s", e)
         cur = self._current_asset
         if cur is not None and asset_id in (cur.id, getattr(self._pair_asset, "id", None)):
-            self.next()
+            self.next()                                 # move on now; Immich calls follow
+        burst = self._block_burst(asset_id, asset)
+        archived, error = self._archive([asset_id] + burst)
         self._publish_state()
-        return {"hidden": asset_id, "archived": archived, "error": error}
+        return {"hidden": asset_id, "archived": archived, "error": error, "burst": len(burst)}
+
+    def _block_burst(self, asset_id: str, asset: Asset | None) -> list[str]:
+        """Block the other shots of `asset_id`'s burst. Returns their ids."""
+        if self._burst_window_s <= 0:
+            return []
+        try:
+            if asset is None:
+                asset = self._client.get_asset(asset_id)
+            mates = self._client.burst_mates(asset, self._burst_window_s)
+        except ImmichError as e:
+            log.warning("burst lookup for %s failed (only it is blocked): %s", asset_id, e)
+            return []
+        added = []
+        for m in mates:
+            if m.id in self._hidden:
+                continue
+            comps = [m.live_photo_video_id] if m.live_photo_video_id else []
+            self._hidden.add(m.id, *comps, details={
+                "file": m.original_file_name, "kind": m.kind.value, "burst_of": asset_id})
+            added.append(m.id)
+        self._hidden.annotate(asset_id, burst_checked=True)
+        if added:
+            log.info("blocked %d more shot(s) from the burst of %s", len(added), asset_id)
+        return added
+
+    def _archive(self, ids: list[str]) -> tuple[bool, str | None]:
+        """Archive blocked assets in Immich (best effort). Returns
+        (the first one archived, the first error). Stops at the first
+        failure — a key without asset.update fails them all alike."""
+        for i, aid in enumerate(ids):
+            try:
+                self._client.update_asset(aid, visibility="archive")
+            except ImmichError as e:
+                log.warning("archive in Immich failed (blocked locally anyway): %s", e)
+                return i > 0, str(e)
+            self._hidden.annotate(aid, archived=True)
+            log.info("archived in Immich: %s", aid)
+        return True, None
+
+    def _block_old_bursts(self) -> None:
+        for aid in self._hidden.needs_burst_check():
+            if self._stop_evt.is_set():
+                return
+            self._block_burst(aid, None)
+        self._publish_state()
 
     def unhide(self, asset_ids: list[str]) -> list[dict]:
         """Unblock assets: remove them from the block list and, when we had
         archived them in Immich, put them back on the timeline so they can
         be selected again. Returns one result per id."""
         results = []
+        asset_ids = list(asset_ids)
+        for aid in list(asset_ids):                     # a burst goes with its photo
+            asset_ids += [m for m in self._hidden.burst_members(aid) if m not in asset_ids]
         for aid in asset_ids:
             details = self._hidden.remove(aid)
             if details is None:

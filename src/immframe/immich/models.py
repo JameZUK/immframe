@@ -61,6 +61,10 @@ class Asset:
     # Collages only: the photos it was composited from and where each sits
     # on the canvas (see CollageTile). Empty for every real asset.
     tiles: tuple["CollageTile", ...] = ()
+    # Capture time in real UTC (Immich's fileCreatedAt). `taken_at` is the
+    # camera's wall-clock time (localDateTime, labelled UTC), which is what
+    # the overlay shows; Immich's takenAfter/takenBefore filters use this one.
+    taken_utc: datetime | None = None
 
     @property
     def is_portrait(self) -> bool:

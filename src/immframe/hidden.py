@@ -9,6 +9,9 @@ on unblock).
 Each block has a *primary* asset id plus optional companions (a live
 photo's motion clip), and details for the dashboard's Blocked page:
 original file name, kind, when it was blocked, whether Immich archived it.
+The other shots of a blocked photo's burst (see bursts.py) are blocks of
+their own with `burst_of` = the photo the user blocked, so they can be
+unblocked one by one, and go with it when it is unblocked.
 
 Persisted as JSON at `$XDG_STATE_HOME/immframe/hidden.json` (default
 `~/.local/state/immframe/hidden.json`):
@@ -78,6 +81,7 @@ class HiddenList:
                     "at": d.get("at"),
                     "archived": bool(d.get("archived", False)),
                     "companions": list(d.get("companions", [])),
+                    "burst_of": d.get("burst_of"),
                 })
         out.sort(key=lambda e: e["at"] or 0, reverse=True)
         return out
@@ -86,6 +90,19 @@ class HiddenList:
         with self._lock:
             d = self._details.get(asset_id)
             return dict(d) if d is not None else None
+
+    def burst_members(self, asset_id: str) -> list[str]:
+        """Blocks added as burst-mates of `asset_id`."""
+        with self._lock:
+            return [a for a, d in self._details.items() if d.get("burst_of") == asset_id]
+
+    def needs_burst_check(self) -> list[str]:
+        """Blocks the user made whose burst hasn't been looked up yet
+        (those from before burst handling)."""
+        with self._lock:
+            return [a for a in self._primaries()
+                    if not self._details.get(a, {}).get("burst_of")
+                    and not self._details.get(a, {}).get("burst_checked")]
 
     def _primaries(self) -> list[str]:
         companions = {c for d in self._details.values() for c in d.get("companions", [])}

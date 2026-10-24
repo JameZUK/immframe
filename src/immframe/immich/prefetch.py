@@ -32,6 +32,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from ..bursts import BurstFilter, same_burst
 from .client import ImmichClient, ImmichError
 from .models import Asset, AssetKind
 from .selector import AssetSelector
@@ -80,6 +81,7 @@ class PrefetchWorker:
         collage: "CollageConfig | None" = None,
         cache_dir: str | Path | None = None,
         is_hidden: Callable[[str], bool] | None = None,
+        bursts: "BurstFilter | None" = None,
     ) -> None:
         self._client = client
         # Predicate, re-read per fetch so a runtime show_text toggle is honored.
@@ -88,6 +90,9 @@ class PrefetchWorker:
         # collage sources alike). Checked per asset, so a hide takes effect
         # on the very next batch.
         self._is_hidden = is_hidden or (lambda _id: False)
+        # Burst thinning: skip burst-mates of a shot queued recently (and of
+        # each other within a batch or a collage). See bursts.py.
+        self._bursts = bursts
         # When set, each queue item is a single composited collage instead of
         # one asset. Canvas defaults until the controller learns the display
         # size (set_collage_canvas) at start().
@@ -236,6 +241,9 @@ class PrefetchWorker:
                     continue
                 if not self._enqueue(item):
                     return
+                if self._bursts is not None:
+                    for tile in item[1].tiles:
+                        self._bursts.note(tile.asset)
                 continue
 
             try:
@@ -246,6 +254,8 @@ class PrefetchWorker:
             if batch is not None:
                 batch = [a for a in batch if not self._is_hidden(a.id)]
                 self._selection_empty = not batch
+                if self._bursts is not None:
+                    batch = self._bursts.thin(batch)
 
             if not batch:
                 self._stop_evt.wait(self._empty_backoff_s)
@@ -268,6 +278,8 @@ class PrefetchWorker:
 
                 if not self._enqueue(item):
                     return
+                if self._bursts is not None:
+                    self._bursts.note(asset)
 
     def _fetch(self, asset: Asset) -> QueueItem | None:
         # Suffix with a per-item sequence number: the same asset can be queued
@@ -330,6 +342,11 @@ class PrefetchWorker:
                 continue
             if self._is_hidden(asset.id):
                 continue
+            if self._bursts is not None and (
+                self._bursts.is_repeat(asset)
+                or any(same_burst(asset, s, self._bursts.window_s) for _, s in sources)
+            ):
+                continue                                # one tile per burst, none shown recently
             # Images and videos both contribute a still (video → poster frame).
             src = self._tmp_dir / f"src-{asset.id}-{self._next_seq()}.jpg"
             try:

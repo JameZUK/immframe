@@ -513,3 +513,26 @@ def test_hidden_assets_are_dropped_from_batches():
         assert "gone" not in [c.args[0] for c in client.download_preview.call_args_list]
     finally:
         w.stop(timeout=2.0)
+
+
+def test_burst_mates_are_thinned_out_of_the_queue():
+    from datetime import datetime, timedelta, timezone
+    from dataclasses import replace
+    from immframe.bursts import BurstFilter
+    t0 = datetime(2021, 6, 15, 17, 20, 4, tzinfo=timezone.utc)
+    shot = lambda aid, dt: replace(_a(aid), taken_at=t0 + timedelta(seconds=dt))
+    selector = MagicMock()
+    selector.next_batch.side_effect = [
+        [shot("b0", 0), shot("b1", 1), shot("x", 90)],
+        [shot("b2", 0.5), shot("y", 300)],              # b2: same burst, shown recently
+        [], [], [], [],
+    ]
+    w = PrefetchWorker(selector, _client_writing_bytes(), queue_size=5, empty_backoff_s=0.01,
+                       bursts=BurstFilter(2, 3600))
+    w.start()
+    try:
+        got = [w.next(timeout=2.0) for _ in range(3)]
+        assert [g[1].id for g in got] == ["b0", "x", "y"]
+        assert w.next(timeout=0.2) is None
+    finally:
+        w.stop(timeout=2.0)
